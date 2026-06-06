@@ -581,6 +581,33 @@ model shifts {
   @@schema("public")
 }
 
+model admin_audit_log {
+  id              Int       @id @default(autoincrement())
+  action          String
+  actor_id        Int
+  actor_username  String
+  target_user_id  Int?
+  target_username String?
+  details         String?
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([created_at(sort: Desc)], map: "idx_admin_audit_log_created_at")
+  @@index([actor_id], map: "idx_admin_audit_log_actor_id")
+  @@schema("public")
+}
+
+model void_codes {
+  id         Int       @id @default(autoincrement())
+  code       String
+  used_by    String?
+  used_at    DateTime? @db.Timestamptz(6)
+  sale_id    String?
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([code], map: "idx_void_codes_code")
+  @@schema("public")
+}
+
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model public_users {
   id            Int       @id @default(autoincrement())
