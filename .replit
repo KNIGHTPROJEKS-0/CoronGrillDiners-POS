@@ -1,0 +1,50 @@
+modules = ["nodejs-20", "web", "postgresql-16", "python-3.11"]
+
+[nix]
+channel = "stable-25_05"
+
+[agent]
+expertMode = true
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run dev"
+waitForPort = 5000
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[userenv]
+
+[userenv.shared]
+NEXTAUTH_SECRET = "c8358e2f4f1983c6897eb02f189ecdd5"
+NEXTAUTH_URL = "https://v0-pos-corongrilldiners.vercel.app"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 300000
+
+[deployment]
+deploymentTarget = "autoscale"
+run = ["pnpm", "run", "start"]
+build = ["pnpm", "run", "build"]
