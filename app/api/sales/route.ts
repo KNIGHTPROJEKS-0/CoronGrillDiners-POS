@@ -42,11 +42,9 @@ export async function POST(request: Request) {
 
     const sessionUsername = createdBy ?? (session.user as any).username ?? session.user.name ?? serverName
 
-    /* Transaction: validate stock + decrement atomically + insert the sale.
-       NULL stock = untracked (unlimited) → never decremented.
-       Each tracked product is updated with a conditional WHERE stock >= qty
-       so concurrent checkouts can't oversell. If any tracked product is
-       short, we ROLLBACK and return 409 with the offending item's name. */
+    /* Transaction: insert the sale without stock validation.
+       The products table does not have a stock column, so stock tracking
+       is not implemented. Products use 'available' boolean instead. */
     const client = await pool.connect()
     console.log("[SALES API] Database connected successfully")
     let sale: any
@@ -55,54 +53,7 @@ export async function POST(request: Request) {
       await client.query("BEGIN")
       console.log("[SALES API] Transaction started")
 
-      if (Array.isArray(items)) {
-        // Aggregate duplicate item IDs so we charge total quantity once
-        const aggregated = new Map<number, number>()
-        for (const it of items) {
-          const pid = Number(it?.id)
-          const qty = Number(it?.quantity)
-          if (!pid || !qty || qty <= 0) continue
-          aggregated.set(pid, (aggregated.get(pid) ?? 0) + qty)
-        }
-        console.log("[SALES API] Stock validation for items:", Array.from(aggregated.entries()))
-        for (const [pid, qty] of aggregated) {
-          const upd = await client.query(
-            `UPDATE public.products
-             SET stock = stock - $1
-             WHERE id = $2 AND stock IS NOT NULL AND stock >= $1
-             RETURNING id, name, stock`,
-            [qty, pid]
-          )
-          if (upd.rowCount === 0) {
-            // Either product doesn't exist, isn't tracked (skip), or is short.
-            // Distinguish so untracked items don't falsely fail.
-            const check = await client.query(
-              `SELECT id, name, stock FROM public.products WHERE id = $1`,
-              [pid]
-            )
-            const row = check.rows[0]
-            if (!row) {
-              console.error("[SALES API] Product not found:", pid)
-              await client.query("ROLLBACK")
-              return NextResponse.json(
-                { error: `Product #${pid} not found` },
-                { status: 409 }
-              )
-            }
-            if (row.stock !== null && row.stock !== undefined) {
-              console.error("[SALES API] Insufficient stock:", { pid, name: row.name, have: row.stock, need: qty })
-              await client.query("ROLLBACK")
-              return NextResponse.json(
-                { error: `Insufficient stock for ${row.name} (have ${row.stock}, need ${qty})` },
-                { status: 409 }
-              )
-            }
-            /* stock IS NULL → untracked, no decrement needed */
-          }
-        }
-        console.log("[SALES API] Stock validation passed")
-      }
-
+      console.log("[SALES API] Skipping stock validation (products table has no stock column)")
       console.log("[SALES API] Attempting to insert sale into database")
       console.log("[SALES API] INSERT values:", {
         orderNumber,
