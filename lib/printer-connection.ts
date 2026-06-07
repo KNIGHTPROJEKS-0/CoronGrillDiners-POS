@@ -366,13 +366,12 @@ export async function printToRawBT(role: PrinterRole, data: Uint8Array): Promise
   if (!printerName) return false
 
   try {
-    // Convert Uint8Array directly to base64 (binary-safe, no TextDecoder)
-    // This preserves ESC/POS binary commands without corruption
-    const binaryString = String.fromCharCode.apply(null, Array.from(data))
-    const base64 = btoa(binaryString)
-    
-    // RawBT intent URL format: rawbt:data:text/plain;base64,{data}?printer={name}
-    const intentUrl = `rawbt:data:text/plain;base64,${base64}?printer=${encodeURIComponent(printerName)}`
+    // Convert Uint8Array to URL-encoded text for RawBT
+    // RawBT expects URL-encoded ESC/POS commands in the text parameter
+    const text = new TextDecoder().decode(data)
+    const urlEncoded = encodeURIComponent(text)
+    // RawBT intent URL format: rawbt://print?text={url_encoded_escpos}
+    const intentUrl = `rawbt://print?text=${urlEncoded}`
     
     // Use hidden iframe to trigger intent without breaking React state
     const iframe = document.createElement('iframe')
