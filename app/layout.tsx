@@ -5,6 +5,7 @@ import { CartProvider } from "./context/cart-context"
 import { ProductProvider } from "./context/product-context"
 import { Providers } from "./providers"
 import SwRegister from "./components/sw-register"
+import { SpeedInsights } from "@vercel/speed-insights/next"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 
@@ -57,6 +58,7 @@ export default async function RootLayout({
             </CartProvider>
           </ProductProvider>
         </Providers>
+        <SpeedInsights />
       </body>
     </html>
   )
