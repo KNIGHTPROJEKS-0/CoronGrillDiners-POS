@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { printTo, printToRawBT } from '@/lib/printer-connection'
+import { printTo, printToRawBT, loadRawBTPrinter, saveRawBTPrinter } from '@/lib/printer-connection'
 import { buildCustomerReceipt, buildKitchenTicket, type PrintData } from '@/lib/escpos'
 
 const STORAGE_KEY = 'cgd_active_receipt'
@@ -30,6 +30,9 @@ export default function ReceiptPage() {
   const [cashierDone, setCashierDone] = useState(false)
   const [kitchenDone, setKitchenDone] = useState(false)
   const autoPrintedRef                = useRef(false)
+  const [showPrinterSetup, setShowPrinterSetup] = useState(false)
+  const [cashierPrinterName, setCashierPrinterName] = useState('')
+  const [kitchenPrinterName, setKitchenPrinterName] = useState('')
 
   // ── Load receipt data from localStorage ─────────────────────────────────────
   useEffect(() => {
@@ -45,6 +48,17 @@ export default function ReceiptPage() {
       }
     } catch {}
   }, [])
+
+  // ── Load existing printer names ─────────────────────────────────────────────
+  useEffect(() => {
+    const cashierName = loadRawBTPrinter('cashier')
+    const kitchenName = loadRawBTPrinter('kitchen')
+    if (cashierName) setCashierPrinterName(cashierName)
+    if (kitchenName) setKitchenPrinterName(kitchenName)
+  }, [])
+
+  // ── Check if printers are configured ──────────────────────────────────────────
+  const printersConfigured = cashierPrinterName.length > 0 && (!entry?.kitchenText || kitchenPrinterName.length > 0)
 
   // ── Auto-print on mount via RawBT (safe iframe) or direct BLE/USB ─────────────
   // /receipt is navigated to in the SAME browser tab (router.push from checkout),
@@ -365,7 +379,131 @@ export default function ReceiptPage() {
         }}>
           ← Back to POS
         </button>
+
+        {/* Retry Print (for when printers are configured after initial load) */}
+        {printersConfigured && (
+          <button
+            onClick={async () => {
+              const pd = getPrintData()
+              if (!pd) return
+              try {
+                await doPrintCashier()
+                if (hasKitchen) await doPrintKitchen()
+                toast.success('Retry print successful')
+              } catch (err) {
+                console.error('Retry print failed:', err)
+                toast.error('Retry print failed')
+              }
+            }}
+            style={{
+              border: '1.5px solid rgba(255,255,255,.2)', borderRadius: 6,
+              padding: '8px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              whiteSpace: 'nowrap', background: 'transparent', color: '#e5e7eb',
+            }}
+          >
+            🔄 Retry Print
+          </button>
+        )}
       </div>
+
+      {/* ── Printer Setup Banner (shown when printers not configured) ───────────── */}
+      {!printersConfigured && (
+        <div style={{
+          background: '#92400e', border: '1px solid #f59e0b', borderRadius: 8,
+          margin: '12px 16px', padding: '12px 16px', color: '#fef3c7',
+          textAlign: 'center', fontSize: 14, fontFamily: 'sans-serif',
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>⚠️ No printer connected yet</div>
+          <div style={{ marginBottom: 12 }}>Please set up your printers to print this receipt.</div>
+          <button
+            onClick={() => setShowPrinterSetup(!showPrinterSetup)}
+            style={{
+              border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13,
+              fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+              background: '#f59e0b', color: '#1f2937',
+            }}
+          >
+            {showPrinterSetup ? 'Hide Printer Setup' : '⚙️ Setup Printers'}
+          </button>
+        </div>
+      )}
+
+      {/* ── Inline Printer Setup (shown when banner button clicked) ─────────────── */}
+      {showPrinterSetup && (
+        <div style={{
+          background: '#1e293b', border: '1px solid rgba(255,255,255,.1)', borderRadius: 8,
+          margin: '0 16px 12px', padding: '16px', color: '#e5e7eb',
+          fontFamily: 'sans-serif',
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 14 }}>Printer Setup (RawBT)</div>
+          
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#94a3b8' }}>
+              Cashier Printer Name
+            </label>
+            <input
+              type="text"
+              placeholder="e.g., RPP02N"
+              value={cashierPrinterName}
+              onChange={(e) => setCashierPrinterName(e.target.value)}
+              style={{
+                width: '100%', padding: '8px 12px', borderRadius: 6,
+                border: '1px solid rgba(255,255,255,.2)', background: '#0f172a',
+                color: '#e5e7eb', fontSize: 13,
+              }}
+            />
+          </div>
+
+          {hasKitchen && (
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', marginBottom: 4, fontSize: 12, color: '#94a3b8' }}>
+                Kitchen Printer Name
+              </label>
+              <input
+                type="text"
+                placeholder="e.g., POS58D"
+                value={kitchenPrinterName}
+                onChange={(e) => setKitchenPrinterName(e.target.value)}
+                style={{
+                  width: '100%', padding: '8px 12px', borderRadius: 6,
+                  border: '1px solid rgba(255,255,255,.2)', background: '#0f172a',
+                  color: '#e5e7eb', fontSize: 13,
+                }}
+              />
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => {
+                saveRawBTPrinter('cashier', cashierPrinterName)
+                if (hasKitchen) saveRawBTPrinter('kitchen', kitchenPrinterName)
+                setShowPrinterSetup(false)
+                toast.success('Printers configured successfully')
+              }}
+              disabled={!cashierPrinterName.trim() || (hasKitchen && !kitchenPrinterName.trim())}
+              style={{
+                flex: 1, border: 'none', borderRadius: 6, padding: '10px 16px',
+                fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                background: '#16a34a', color: '#fff',
+                opacity: (!cashierPrinterName.trim() || (hasKitchen && !kitchenPrinterName.trim())) ? 0.5 : 1,
+              }}
+            >
+              Save & Print
+            </button>
+            <button
+              onClick={() => setShowPrinterSetup(false)}
+              style={{
+                border: '1px solid rgba(255,255,255,.2)', borderRadius: 6,
+                padding: '10px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                background: 'transparent', color: '#e5e7eb',
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Success banner ───────────────────────────────────────────────────── */}
       {allDone && (
