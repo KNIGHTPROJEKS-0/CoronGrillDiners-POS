@@ -31,6 +31,7 @@ import { savePendingSale } from "@/hooks/use-offline-sync"
 import { usePrinterStatus } from "@/app/hooks/use-printer-status"
 import { printTo } from "@/lib/printer-connection"
 import { buildCustomerReceipt, buildKitchenTicket, type PrintData } from "@/lib/escpos"
+import { useShift } from "@/hooks/use-shift"
 
 function storeReceiptData(d: import("@/lib/escpos").PrintData, returnPath: string, withKitchen = false): void {
   const W = 32
@@ -164,6 +165,7 @@ export default function CheckoutPage() {
   const { data: session } = useSession()
   const { cart, cartTotal, clearCart } = useCart()
   const { refreshProducts } = useProducts()
+  const { shift } = useShift()
 
   const [paymentMethod, setPaymentMethod] = useState("cash")
   const [seniorDiscount, setSeniorDiscount] = useState<0 | 10 | 20>(0)
@@ -280,6 +282,7 @@ export default function CheckoutPage() {
           changeAmount: change,
           serverName,
           createdBy: session?.user?.name ?? serverName,
+          shiftId: shift?.id,
         }),
       })
       if (res.status === 409) {

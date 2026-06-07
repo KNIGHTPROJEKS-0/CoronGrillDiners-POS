@@ -551,9 +551,11 @@ model sales {
   status           String    @default("completed")
   void_reason      String?
   discount_percent Int?      @default(0) @db.SmallInt
+  shift_id         Int?
 
   @@index([created_at(sort: Desc)], map: "idx_sales_created_at")
   @@index([payment_method], map: "idx_sales_payment_method")
+  @@index([shift_id], map: "idx_sales_shift_id")
   @@schema("public")
 }
 

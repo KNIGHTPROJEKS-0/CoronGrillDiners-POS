@@ -23,6 +23,7 @@ export async function POST(request: Request) {
       amountTendered,
       changeAmount,
       serverName,
+      shiftId,
     } = body
 
     const sessionUsername = (session.user as any).username ?? session.user.name ?? serverName
@@ -84,8 +85,8 @@ export async function POST(request: Request) {
 
       const result = await client.query(
         `INSERT INTO public.sales
-          (order_number, items, subtotal, service_charge, grand_total, payment_method, amount_tendered, change_amount, server_name, created_by, status, discount_percent)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'completed', $11)
+          (order_number, items, subtotal, service_charge, grand_total, payment_method, amount_tendered, change_amount, server_name, created_by, status, discount_percent, shift_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'completed', $11, $12)
          RETURNING id, order_number, grand_total, status, created_at`,
         [
           orderNumber,
@@ -99,9 +100,28 @@ export async function POST(request: Request) {
           serverName,
           sessionUsername,
           discountPercent ?? 0,
+          shiftId || null,
         ]
       )
       sale = result.rows[0]
+
+      // Update shift metrics if shift_id is provided
+      if (shiftId && paymentMethod === 'cash') {
+        await client.query(
+          `UPDATE public.shifts
+           SET total_cash_sales = COALESCE(total_cash_sales, 0) + $1,
+               total_sales = COALESCE(total_sales, 0) + $1
+           WHERE id = $2`,
+          [grandTotal, shiftId]
+        )
+      } else if (shiftId) {
+        await client.query(
+          `UPDATE public.shifts
+           SET total_sales = COALESCE(total_sales, 0) + $1
+           WHERE id = $2`,
+          [grandTotal, shiftId]
+        )
+      }
 
       await client.query("COMMIT")
     } catch (txErr) {
