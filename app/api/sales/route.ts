@@ -14,7 +14,15 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body = await request.json()
+    console.log("[SALES API] Attempting to parse request body")
+    let body
+    try {
+      body = await request.json()
+      console.log("[SALES API] Request body parsed successfully")
+    } catch (jsonErr) {
+      console.error("[SALES API] Failed to parse request body:", jsonErr)
+      return NextResponse.json({ error: "Invalid JSON in request body" }, { status: 400 })
+    }
     const {
       orderNumber,
       items,
