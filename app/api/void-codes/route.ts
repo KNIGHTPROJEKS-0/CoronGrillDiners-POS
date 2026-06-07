@@ -27,6 +27,7 @@ export async function PUT() {
   if (!session?.user || session.user.role !== "admin") {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+  
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
   const generate = (): string => {
     const part = (len: number) =>
@@ -40,18 +41,47 @@ export async function PUT() {
     if (!batch.includes(c)) batch.push(c)
   }
 
+  const client = await pool.connect()
   try {
+    await client.query("BEGIN")
+    
+    // Create void_codes table if it doesn't exist
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS void_codes (
+        id SERIAL PRIMARY KEY,
+        code VARCHAR(20) UNIQUE NOT NULL,
+        used_by VARCHAR(255),
+        used_at TIMESTAMPTZ,
+        sale_id INTEGER REFERENCES public.sales(id),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+    
+    // Create indexes if they don't exist
+    try {
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_void_codes_code ON void_codes(code)`)
+    } catch { /* index might already exist */ }
+    try {
+      await client.query(`CREATE INDEX IF NOT EXISTS idx_void_codes_used_at ON void_codes(used_at)`)
+    } catch { /* index might already exist */ }
+
     const inserted: string[] = []
     for (const code of batch) {
-      const r = await pool.query(
+      const r = await client.query(
         `INSERT INTO void_codes (code) VALUES ($1) ON CONFLICT (code) DO NOTHING RETURNING code`,
         [code]
       )
       if (r.rows[0]) inserted.push(r.rows[0].code)
     }
+    
+    await client.query("COMMIT")
     return NextResponse.json({ success: true, generated: inserted })
-  } catch {
-    return NextResponse.json({ error: "Failed to generate codes" }, { status: 500 })
+  } catch (error) {
+    await client.query("ROLLBACK")
+    console.error("Failed to generate codes:", error)
+    return NextResponse.json({ error: "Failed to generate codes", details: String(error) }, { status: 500 })
+  } finally {
+    client.release()
   }
 }
 
