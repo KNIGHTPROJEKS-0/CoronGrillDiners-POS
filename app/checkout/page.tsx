@@ -267,6 +267,16 @@ export default function CheckoutPage() {
 
   const recordSale = async () => {
     try {
+      console.log("[CHECKOUT] Starting recordSale:", {
+        orderNumber,
+        grandTotal,
+        paymentMethod,
+        serverName,
+        createdBy: session?.user?.name ?? serverName,
+        shiftId: shift?.id,
+        itemCount: printData.items.length,
+      })
+
       const res = await fetch("/api/sales", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -285,6 +295,8 @@ export default function CheckoutPage() {
           shiftId: shift?.id,
         }),
       })
+
+      console.log("[CHECKOUT] Sales API response status:", res.status)
       if (res.status === 409) {
         /* Server rejected sale due to insufficient stock — surface the
            specific reason to the cashier and refresh products so the UI
@@ -298,7 +310,11 @@ export default function CheckoutPage() {
         throw new Error("STOCK_REJECTED")
       }
       const j = await res.json().catch(() => null)
-      if (!res.ok) throw new Error("Server error")
+      console.log("[CHECKOUT] Sales API response:", j)
+      if (!res.ok) {
+        console.error("[CHECKOUT] Sales API failed:", res.status, j)
+        throw new Error("Server error")
+      }
       if (j?.alreadySaved) {
         /* The order_number already exists in the DB — the previous POST
            succeeded but the response was lost (flaky network / PWA background).
@@ -310,10 +326,12 @@ export default function CheckoutPage() {
       }
       /* Refresh products so cashier sees updated stock counts immediately */
       try { await refreshProducts() } catch {}
+      console.log("[CHECKOUT] Order saved successfully:", orderNumber)
       toast.success(`Order ${orderNumber} saved`, {
         description: `${printData.items.length} item${printData.items.length === 1 ? "" : "s"} · ₱${grandTotal.toFixed(2)} · ${paymentMethod.toUpperCase()}`,
       })
     } catch (err) {
+      console.error("[CHECKOUT] recordSale failed:", err)
       if (err instanceof Error && err.message === "STOCK_REJECTED") throw err
       savePendingSale({
         orderNumber,

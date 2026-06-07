@@ -6,7 +6,10 @@ import { logEvent } from "@/lib/audit"
 
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions)
+  console.log("[SALES API] Session check:", { hasSession: !!session, hasUser: !!session?.user, userId: session?.user?.id, userRole: (session?.user as any)?.role })
+  
   if (!session?.user) {
+    console.error("[SALES API] Unauthorized - no session or user")
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
@@ -107,9 +110,11 @@ export async function POST(request: Request) {
         ]
       )
       sale = result.rows[0]
+      console.log("[SALES API] Sale inserted successfully:", { id: sale.id, orderNumber: sale.order_number })
 
       // Update shift metrics if shift_id is provided
       if (shiftId && paymentMethod === 'cash') {
+        console.log("[SALES API] Updating shift metrics for cash sale:", { shiftId, grandTotal })
         await client.query(
           `UPDATE public.shifts
            SET total_cash_sales = COALESCE(total_cash_sales, 0) + $1,
@@ -118,6 +123,7 @@ export async function POST(request: Request) {
           [grandTotal, shiftId]
         )
       } else if (shiftId) {
+        console.log("[SALES API] Updating shift metrics for non-cash sale:", { shiftId, grandTotal })
         await client.query(
           `UPDATE public.shifts
            SET total_sales = COALESCE(total_sales, 0) + $1
@@ -127,6 +133,7 @@ export async function POST(request: Request) {
       }
 
       await client.query("COMMIT")
+      console.log("[SALES API] Transaction committed successfully")
     } catch (txErr) {
       await client.query("ROLLBACK")
       // Re-throw non-23505 errors so the outer catch can return a 500.
