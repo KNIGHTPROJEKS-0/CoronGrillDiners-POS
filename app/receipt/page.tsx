@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { printTo, printToRawBT } from '@/lib/printer-connection'
 import { buildCustomerReceipt, buildKitchenTicket, type PrintData } from '@/lib/escpos'
 
@@ -57,38 +58,75 @@ export default function ReceiptPage() {
     if (!pd) return
     const finalPd = pd
     ;(async () => {
-      // Try RawBT first (safe iframe method)
-      const cashierRawbtSuccess = await printToRawBT('cashier', buildCustomerReceipt(finalPd))
-      let cashierOk = cashierRawbtSuccess
-      
-      // Fall back to direct BLE/USB if RawBT not configured
-      if (!cashierOk) {
-        const cashierResult = await printTo('cashier', buildCustomerReceipt(finalPd))
-        cashierOk = cashierResult !== 'none'
-      }
-      if (cashierOk) setCashierDone(true)
-
-      // Auto-print kitchen only when the cashier explicitly opted in via the
-      // "Also print kitchen ticket" checkbox. The kitchen preview/button stay
-      // visible either way so the cashier can manually print on demand.
-      let kitchenOk = false
-      if (entry.autoPrintKitchen) {
-        // Try RawBT first for kitchen
-        const kitchenRawbtSuccess = await printToRawBT('kitchen', buildKitchenTicket(finalPd))
-        kitchenOk = kitchenRawbtSuccess
+      try {
+        // Try RawBT first (safe iframe method)
+        let cashierOk = false
+        try {
+          const cashierRawbtSuccess = await printToRawBT('cashier', buildCustomerReceipt(finalPd))
+          cashierOk = cashierRawbtSuccess
+        } catch (err) {
+          console.error('RawBT cashier print failed:', err)
+          toast.error('Receipt could not print automatically', {
+            description: 'RawBT printer not configured or unavailable'
+          })
+        }
         
         // Fall back to direct BLE/USB if RawBT not configured
-        if (!kitchenOk) {
-          const kitchenResult = await printTo('kitchen', buildKitchenTicket(finalPd))
-          kitchenOk = kitchenResult !== 'none'
+        if (!cashierOk) {
+          try {
+            const cashierResult = await printTo('cashier', buildCustomerReceipt(finalPd))
+            cashierOk = cashierResult !== 'none'
+          } catch (err) {
+            console.error('BLE/USB cashier print failed:', err)
+            toast.error('Receipt could not print automatically', {
+              description: 'No printer connected'
+            })
+          }
         }
-        if (kitchenOk) setKitchenDone(true)
-      }
+        if (cashierOk) setCashierDone(true)
 
-      // If everything that was supposed to auto-print succeeded, return to POS
-      // after a brief success flash.
-      if (cashierOk && (!entry.autoPrintKitchen || kitchenOk)) {
-        setTimeout(() => router.push(entry.returnPath || '/'), 1800)
+        // Auto-print kitchen only when the cashier explicitly opted in via the
+        // "Also print kitchen ticket" checkbox. The kitchen preview/button stay
+        // visible either way so the cashier can manually print on demand.
+        let kitchenOk = false
+        if (entry.autoPrintKitchen) {
+          try {
+            // Try RawBT first for kitchen
+            const kitchenRawbtSuccess = await printToRawBT('kitchen', buildKitchenTicket(finalPd))
+            kitchenOk = kitchenRawbtSuccess
+          } catch (err) {
+            console.error('RawBT kitchen print failed:', err)
+            toast.error('Kitchen ticket could not print automatically', {
+              description: 'RawBT printer not configured or unavailable'
+            })
+          }
+          
+          // Fall back to direct BLE/USB if RawBT not configured
+          if (!kitchenOk) {
+            try {
+              const kitchenResult = await printTo('kitchen', buildKitchenTicket(finalPd))
+              kitchenOk = kitchenResult !== 'none'
+            } catch (err) {
+              console.error('BLE/USB kitchen print failed:', err)
+              toast.error('Kitchen ticket could not print automatically', {
+                description: 'No printer connected'
+              })
+            }
+          }
+          if (kitchenOk) setKitchenDone(true)
+        }
+
+        // If everything that was supposed to auto-print succeeded, return to POS
+        // after a brief success flash.
+        if (cashierOk && (!entry.autoPrintKitchen || kitchenOk)) {
+          setTimeout(() => router.push(entry.returnPath || '/'), 1800)
+        }
+      } catch (err) {
+        console.error('Auto-print failed completely:', err)
+        toast.error('Printing failed', {
+          description: 'Please try printing manually from the receipt page'
+        })
+        // Don't crash the page - just log the error and let the user see the receipt
       }
     })()
   }, [entry])
@@ -102,12 +140,26 @@ export default function ReceiptPage() {
   async function doPrintCashier() {
     const pd = getPrintData()
     if (!pd) return
-    // Try RawBT first (safe iframe method)
-    const rawbtSuccess = await printToRawBT('cashier', buildCustomerReceipt(pd))
-    if (rawbtSuccess) { setCashierDone(true); return }
-    // Fall back to direct BLE/USB
-    const result = await printTo('cashier', buildCustomerReceipt(pd))
-    if (result !== 'none') { setCashierDone(true); return }
+    try {
+      // Try RawBT first (safe iframe method)
+      const rawbtSuccess = await printToRawBT('cashier', buildCustomerReceipt(pd))
+      if (rawbtSuccess) { setCashierDone(true); return }
+    } catch (err) {
+      console.error('RawBT cashier print failed:', err)
+      toast.error('Receipt could not print', {
+        description: 'RawBT printer not configured or unavailable'
+      })
+    }
+    try {
+      // Fall back to direct BLE/USB
+      const result = await printTo('cashier', buildCustomerReceipt(pd))
+      if (result !== 'none') { setCashierDone(true); return }
+    } catch (err) {
+      console.error('BLE/USB cashier print failed:', err)
+      toast.error('Receipt could not print', {
+        description: 'No printer connected'
+      })
+    }
     // No direct BLE/USB — share cashier receipt text via Android share sheet → RawBT
     if (entry?.receiptText) {
       shareTxt(
@@ -121,12 +173,26 @@ export default function ReceiptPage() {
   async function doPrintKitchen() {
     const pd = getPrintData()
     if (!pd) return
-    // Try RawBT first (safe iframe method)
-    const rawbtSuccess = await printToRawBT('kitchen', buildKitchenTicket(pd))
-    if (rawbtSuccess) { setKitchenDone(true); return }
-    // Fall back to direct BLE/USB
-    const result = await printTo('kitchen', buildKitchenTicket(pd))
-    if (result !== 'none') { setKitchenDone(true); return }
+    try {
+      // Try RawBT first (safe iframe method)
+      const rawbtSuccess = await printToRawBT('kitchen', buildKitchenTicket(pd))
+      if (rawbtSuccess) { setKitchenDone(true); return }
+    } catch (err) {
+      console.error('RawBT kitchen print failed:', err)
+      toast.error('Kitchen ticket could not print', {
+        description: 'RawBT printer not configured or unavailable'
+      })
+    }
+    try {
+      // Fall back to direct BLE/USB
+      const result = await printTo('kitchen', buildKitchenTicket(pd))
+      if (result !== 'none') { setKitchenDone(true); return }
+    } catch (err) {
+      console.error('BLE/USB kitchen print failed:', err)
+      toast.error('Kitchen ticket could not print', {
+        description: 'No printer connected'
+      })
+    }
     // No direct BLE/USB — share kitchen ticket text via Android share sheet → RawBT
     const text = entry?.kitchenText ?? fallbackKitchenText(pd)
     shareTxt(
