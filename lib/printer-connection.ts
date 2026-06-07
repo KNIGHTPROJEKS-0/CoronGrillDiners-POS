@@ -1,11 +1,11 @@
 /**
  * Singleton printer connection manager for XP-58H printers.
- * Supports Web Serial (USB) and Web Bluetooth (BLE) connections.
+ * Supports Web Serial (USB), Web Bluetooth (BLE), and RawBT (Android) connections.
  * Two roles: 'cashier' (customer receipt) and 'kitchen' (kitchen ticket).
  */
 
 export type PrinterRole = 'cashier' | 'kitchen'
-export type ConnType = 'usb' | 'bluetooth' | null
+export type ConnType = 'usb' | 'bluetooth' | 'rawbt' | null
 
 // ─── Known printer identities ──────────────────────────────────────────────────
 // Web Bluetooth cannot filter by MAC address (hidden for privacy by the spec),
@@ -341,6 +341,42 @@ export async function printTo(role: PrinterRole, data: Uint8Array): Promise<'usb
   }
 
   return 'none'
+}
+
+// ─── RawBT (Android) ───────────────────────────────────────────────────────────
+
+/** Save RawBT printer name for a role. */
+export function saveRawBTPrinter(role: PrinterRole, printerName: string) {
+  try { localStorage.setItem(`cgd_rawbt_${role}`, printerName) } catch { /* SSR */ }
+}
+
+/** Load RawBT printer name for a role. */
+export function loadRawBTPrinter(role: PrinterRole): string | null {
+  try { return localStorage.getItem(`cgd_rawbt_${role}`) } catch { return null }
+}
+
+/** Clear RawBT printer name for a role. */
+export function clearRawBTPrinter(role: PrinterRole) {
+  try { localStorage.removeItem(`cgd_rawbt_${role}`) } catch { /* SSR */ }
+}
+
+/** Print using RawBT intent URL. Opens RawBT app on Android. */
+export async function printToRawBT(role: PrinterRole, data: Uint8Array): Promise<boolean> {
+  const printerName = loadRawBTPrinter(role)
+  if (!printerName) return false
+
+  try {
+    // Convert Uint8Array to base64
+    const base64 = btoa(String.fromCharCode(...data))
+    // RawBT intent URL format: rawbt:data:text/plain;base64,{data}?printer={name}
+    const intentUrl = `rawbt:data:text/plain;base64,${base64}?printer=${encodeURIComponent(printerName)}`
+    
+    // Open intent URL - this will launch RawBT app on Android
+    window.location.href = intentUrl
+    return true
+  } catch {
+    return false
+  }
 }
 
 // ─── localStorage metadata ─────────────────────────────────────────────────────

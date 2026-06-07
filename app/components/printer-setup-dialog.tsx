@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import {
   Usb, Bluetooth, Wifi, WifiOff, Printer, CheckCircle,
   AlertCircle, Loader2, X, ExternalLink,
@@ -19,6 +20,10 @@ import {
   isInsideIframe,
   PRINTER_NAMES,
   PRINTER_MACS,
+  saveRawBTPrinter,
+  loadRawBTPrinter,
+  clearRawBTPrinter,
+  printToRawBT,
 } from "@/lib/printer-connection"
 import { usePrinterStatus } from "@/app/hooks/use-printer-status"
 import { buildCustomerReceipt, buildKitchenTicket, type PrintData } from "@/lib/escpos"
@@ -53,6 +58,25 @@ function PrinterSlot({ role, label, description, disabled }: PrinterSlotProps) {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [testOk, setTestOk] = useState(false)
+  const [rawbtName, setRawbtName] = useState("")
+  const [showRawbtInput, setShowRawbtInput] = useState(false)
+
+  useEffect(() => {
+    const saved = loadRawBTPrinter(role)
+    if (saved) setRawbtName(saved)
+  }, [role])
+
+  const saveRawbtName = () => {
+    if (rawbtName.trim()) {
+      saveRawBTPrinter(role, rawbtName.trim())
+      setShowRawbtInput(false)
+    }
+  }
+
+  const clearRawbtName = () => {
+    clearRawBTPrinter(role)
+    setRawbtName("")
+  }
 
   const run = async (fn: () => Promise<void>, action: string) => {
     setBusy(action)
@@ -71,8 +95,17 @@ function PrinterSlot({ role, label, description, disabled }: PrinterSlotProps) {
     const data = role === "cashier"
       ? buildCustomerReceipt(TEST_DATA)
       : buildKitchenTicket(TEST_DATA)
+    // Try RawBT first if configured
+    if (rawbtName) {
+      const result = await printToRawBT(role, data)
+      if (result) {
+        setTestOk(true)
+        return
+      }
+    }
+    // Fall back to USB/Bluetooth
     const result = await printTo(role, data)
-    if (result === "none") setError("No printer connected. Connect USB or Bluetooth first.")
+    if (result === "none") setError("No printer connected. Connect USB/Bluetooth or configure RawBT first.")
     else setTestOk(true)
   }
 
@@ -142,28 +175,83 @@ function PrinterSlot({ role, label, description, disabled }: PrinterSlotProps) {
 
       {/* Connect buttons */}
       {!st.connected && (
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 text-xs"
-            onClick={() => run(() => connectUSB(role), "usb")}
-            disabled={!!busy || disabled}
-          >
-            {busy === "usb" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Usb className="h-3.5 w-3.5" />}
-            USB
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 text-xs"
-            onClick={() => run(() => connectBluetooth(role), "bt")}
-            disabled={!!busy || disabled}
-          >
-            {busy === "bt" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bluetooth className="h-3.5 w-3.5" />}
-            Bluetooth
-          </Button>
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={() => run(() => connectUSB(role), "usb")}
+              disabled={!!busy || disabled}
+            >
+              {busy === "usb" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Usb className="h-3.5 w-3.5" />}
+              USB
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={() => run(() => connectBluetooth(role), "bt")}
+              disabled={!!busy || disabled}
+            >
+              {busy === "bt" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bluetooth className="h-3.5 w-3.5" />}
+              Bluetooth
+            </Button>
+          </div>
+
+          {/* RawBT Configuration */}
+          <div className="border-t pt-3 mt-2">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-gray-700">RawBT (Android)</span>
+              {rawbtName ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-xs text-red-600 hover:text-red-700"
+                  onClick={clearRawbtName}
+                >
+                  Clear
+                </Button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-xs"
+                  onClick={() => setShowRawbtInput(!showRawbtInput)}
+                >
+                  {showRawbtInput ? "Cancel" : "Configure"}
+                </Button>
+              )}
+            </div>
+            {rawbtName ? (
+              <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2">
+                <CheckCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                <span className="font-mono">{rawbtName}</span>
+              </div>
+            ) : showRawbtInput ? (
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Enter printer name"
+                  value={rawbtName}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRawbtName(e.target.value)}
+                  className="text-xs h-8"
+                />
+                <Button
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={saveRawbtName}
+                  disabled={!rawbtName.trim()}
+                >
+                  Save
+                </Button>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500">
+                Configure RawBT printer name for Android devices
+              </p>
+            )}
+          </div>
+        </>
       )}
 
       {/* Test print */}

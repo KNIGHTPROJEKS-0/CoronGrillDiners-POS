@@ -29,7 +29,7 @@ import { useProducts } from "../context/product-context"
 import ThermalReceipt from "../components/thermal-receipt"
 import { savePendingSale } from "@/hooks/use-offline-sync"
 import { usePrinterStatus } from "@/app/hooks/use-printer-status"
-import { printTo } from "@/lib/printer-connection"
+import { printTo, printToRawBT } from "@/lib/printer-connection"
 import { buildCustomerReceipt, buildKitchenTicket, type PrintData } from "@/lib/escpos"
 import { useShift } from "@/hooks/use-shift"
 
@@ -374,60 +374,57 @@ export default function CheckoutPage() {
 
   // ── Option 2: Print Only (no DB record) ─────────────────────────────────────
   const handlePrintOnly = async () => {
-    if (cashierPrinter.connected) {
-      // Direct BLE/USB — silent print, no receipt page
-      setIsBusy(true)
-      setShowSummaryModal(false)
-      await printTo("cashier", buildCustomerReceipt(printData))
-      if (withKitchenTicket) await printTo("kitchen", buildKitchenTicket(printData))
-      setIsBusy(false)
-      finishOrder(200)
-      return
-    }
-    // No direct printer — store data and navigate to /receipt in the SAME tab.
-    // Same-tab client-side navigation (router.push) preserves the module-level
-    // btChars state so printTo() in /receipt can still reach paired printers.
-    completingRef.current = true
-    storeReceiptData(printData, isAdmin ? "/pos" : "/", withKitchenTicket)
-    invalidateSnapshot()
+    setIsBusy(true)
     setShowSummaryModal(false)
-    clearCart()
-    router.push("/receipt")
+    
+    // Try RawBT first (Android)
+    const cashierReceipt = buildCustomerReceipt(printData)
+    const kitchenTicket = buildKitchenTicket(printData)
+    
+    const cashierRawbtSuccess = await printToRawBT("cashier", cashierReceipt)
+    if (cashierRawbtSuccess && withKitchenTicket) {
+      await printToRawBT("kitchen", kitchenTicket)
+    }
+    
+    // Fall back to USB/Bluetooth if RawBT not configured or failed
+    if (!cashierRawbtSuccess && cashierPrinter.connected) {
+      await printTo("cashier", cashierReceipt)
+      if (withKitchenTicket) await printTo("kitchen", kitchenTicket)
+    }
+    
+    setIsBusy(false)
+    finishOrder(200)
+    return
   }
 
   // ── Option 3: Print + Save ──────────────────────────────────────────────────
   const handlePrintAndSave = async () => {
-    if (cashierPrinter.connected) {
-      // Direct BLE/USB — record sale then silent print
-      setIsBusy(true)
-      try {
-        await recordSale()
-        setShowSummaryModal(false)
-        await printTo("cashier", buildCustomerReceipt(printData))
-        if (withKitchenTicket) await printTo("kitchen", buildKitchenTicket(printData))
-        finishOrder(200)
-      } catch {
-        /* recordSale threw (e.g. STOCK_REJECTED — already toasted). Keep modal open. */
-      } finally {
-        setIsBusy(false)
-      }
-      return
-    }
-    // No direct printer — record sale first, then navigate to /receipt
     setIsBusy(true)
     try {
       await recordSale()
+      setShowSummaryModal(false)
+      
+      // Try RawBT first (Android)
+      const cashierReceipt = buildCustomerReceipt(printData)
+      const kitchenTicket = buildKitchenTicket(printData)
+      
+      const cashierRawbtSuccess = await printToRawBT("cashier", cashierReceipt)
+      if (cashierRawbtSuccess && withKitchenTicket) {
+        await printToRawBT("kitchen", kitchenTicket)
+      }
+      
+      // Fall back to USB/Bluetooth if RawBT not configured or failed
+      if (!cashierRawbtSuccess && cashierPrinter.connected) {
+        await printTo("cashier", cashierReceipt)
+        if (withKitchenTicket) await printTo("kitchen", kitchenTicket)
+      }
+      
+      finishOrder(200)
     } catch {
+      /* recordSale threw (e.g. STOCK_REJECTED — already toasted). Keep modal open. */
+    } finally {
       setIsBusy(false)
-      return // STOCK_REJECTED — keep modal open so cashier can adjust and retry
     }
-    completingRef.current = true
-    storeReceiptData(printData, isAdmin ? "/pos" : "/", withKitchenTicket)
-    invalidateSnapshot()
-    setIsBusy(false)
-    setShowSummaryModal(false)
-    clearCart()
-    router.push("/receipt")
   }
 
   // Don't render anything until the client-side mount effect has captured the
