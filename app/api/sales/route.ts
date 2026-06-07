@@ -40,7 +40,8 @@ export async function POST(request: Request) {
 
     console.log("[SALES API] Received order:", { orderNumber, grandTotal, paymentMethod, shiftId, createdBy })
 
-    const sessionUsername = createdBy ?? (session.user as any).username ?? session.user.name ?? serverName
+    // Use username for created_by to match the filter in sales/my API
+    const sessionUsername = (session.user as any).username ?? createdBy ?? session.user.name ?? serverName
 
     /* Transaction: insert the sale without stock validation.
        The products table does not have a stock column, so stock tracking
