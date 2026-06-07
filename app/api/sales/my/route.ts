@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url)
-  const date = searchParams.get("date") || new Date().toLocaleDateString("en-CA")
+  const date = searchParams.get("date") || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
   const username = (session.user as any).username ?? session.user.name
 
   try {
