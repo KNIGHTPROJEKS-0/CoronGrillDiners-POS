@@ -393,19 +393,28 @@ export default function CheckoutPage() {
     setIsBusy(true)
     setShowSummaryModal(false)
     
-    // Try RawBT first (Android)
+    // Build receipts
     const cashierReceipt = buildCustomerReceipt(printData)
     const kitchenTicket = buildKitchenTicket(printData)
     
-    const cashierRawbtSuccess = await printToRawBT("cashier", cashierReceipt)
-    if (cashierRawbtSuccess && withKitchenTicket) {
-      await printToRawBT("kitchen", kitchenTicket)
+    // Prioritize Web Bluetooth/USB for dual printer support (can connect to specific devices by name)
+    // Web Bluetooth supports simultaneous connections to both RPP02N (cashier) and POS58D (kitchen)
+    let cashierPrinted = false
+    if (cashierPrinter.connected) {
+      await printTo("cashier", cashierReceipt)
+      cashierPrinted = true
+      if (withKitchenTicket && kitchenPrinter.connected) {
+        await printTo("kitchen", kitchenTicket)
+      }
     }
     
-    // Fall back to USB/Bluetooth if RawBT not configured or failed
-    if (!cashierRawbtSuccess && cashierPrinter.connected) {
-      await printTo("cashier", cashierReceipt)
-      if (withKitchenTicket) await printTo("kitchen", kitchenTicket)
+    // Fall back to RawBT only if Web Bluetooth/USB not connected
+    // Note: RawBT uses the default printer set in the app, so it can only print to one printer at a time
+    if (!cashierPrinted) {
+      const cashierRawbtSuccess = await printToRawBT("cashier", cashierReceipt)
+      if (cashierRawbtSuccess && withKitchenTicket) {
+        await printToRawBT("kitchen", kitchenTicket)
+      }
     }
     
     setIsBusy(false)
