@@ -241,7 +241,17 @@ export default function AdminPage() {
           return
         }
         
-        // Check for new orders
+        // Check if the last seen order still exists (wasn't deleted)
+        const lastSeenExists = orders.some(o => o.id === lastSeenOrderIdRef.current)
+        
+        // If last seen order was deleted, reset to newest without toasting
+        if (!lastSeenExists) {
+          lastSeenOrderIdRef.current = newest.id
+          localStorage.setItem(storageKey, newest.id)
+          return
+        }
+        
+        // Check for new orders (only if last seen still exists)
         if (newest.id !== lastSeenOrderIdRef.current && newest.status === "completed") {
           const lastSeen = lastSeenOrderIdRef.current
           lastSeenOrderIdRef.current = newest.id
