@@ -210,12 +210,19 @@ export default function AdminPage() {
 
   // ── New-order notifications (poll every 15 s while admin is signed in) ────
   // Tracks the latest order id we've already notified the admin about so we
-  // don't re-toast the same order on every poll. Initial value is set on the
-  // first poll (no toast on initial mount).
+  // don't re-toast the same order on every poll. Uses localStorage to persist
+  // across page refreshes and depends on selectedDate to avoid cross-date issues.
   const lastSeenOrderIdRef = useRef<string | null>(null)
   useEffect(() => {
     if (status !== "authenticated" || !isAdmin) return
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
+    const storageKey = `admin_lastSeenOrderId_${today}`
+    
+    // Initialize from localStorage on first load
+    if (lastSeenOrderIdRef.current === null) {
+      lastSeenOrderIdRef.current = localStorage.getItem(storageKey)
+    }
+    
     let cancelled = false
 
     const poll = async () => {
@@ -226,13 +233,19 @@ export default function AdminPage() {
         const orders = data.recentOrders ?? []
         if (orders.length === 0) return
         const newest = orders[0]
+        
+        // First poll: set to newest without toasting
         if (lastSeenOrderIdRef.current === null) {
           lastSeenOrderIdRef.current = newest.id
+          localStorage.setItem(storageKey, newest.id)
           return
         }
+        
+        // Check for new orders
         if (newest.id !== lastSeenOrderIdRef.current && newest.status === "completed") {
           const lastSeen = lastSeenOrderIdRef.current
           lastSeenOrderIdRef.current = newest.id
+          localStorage.setItem(storageKey, newest.id)
           const newOnes: typeof orders = []
           for (const o of orders) {
             if (o.id === lastSeen) break
@@ -252,7 +265,7 @@ export default function AdminPage() {
     poll()
     const interval = setInterval(poll, 15000)
     return () => { cancelled = true; clearInterval(interval) }
-  }, [status, isAdmin])
+  }, [status, isAdmin, selectedDate])
 
   // ── Auth guards ────────────────────────────────────────────────────────────
 
@@ -504,7 +517,6 @@ function DashboardSection({ data, selectedDate, onRefresh }: { data: SalesData |
   }
 
   const handleDelete = async (order: ManagedOrder) => {
-    if (!confirm(`Permanently delete order ${order.order_number}? This cannot be undone.`)) return
     setActionBusy(order.id)
     const res = await fetch(`/api/sales/${order.id}`, { method: "DELETE" })
     if (res.ok) {
@@ -821,7 +833,7 @@ function OrderStatusBadge({ status }: { status: string }) {
   )
 }
 
-function ShiftsSection({ selectedDate }: { selectedDate: string }) {
+function ShiftsSection({ selectedDate, onRefresh }: { selectedDate: string; onRefresh?: () => Promise<void> }) {
   const isToday = selectedDate === new Date().toLocaleDateString("en-CA")
   const [shifts, setShifts] = useState<ShiftRecord[]>([])
   const [loading, setLoading] = useState(true)
@@ -901,11 +913,11 @@ function ShiftsSection({ selectedDate }: { selectedDate: string }) {
   }
 
   const handleDelete = async (shift: ShiftRecord) => {
-    if (!confirm(`Delete shift for ${shift.cashier_name}? This cannot be undone.`)) return
     const res = await fetch(`/api/shifts/${shift.id}`, { method: "DELETE" })
     if (res.ok) {
       fetchShifts()
       if (expandedShiftId === shift.id) setExpandedShiftId(null)
+      onRefresh?.().catch(() => {})
     } else {
       setActionError("Failed to delete shift.")
     }

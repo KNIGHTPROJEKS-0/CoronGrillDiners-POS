@@ -327,9 +327,7 @@ export default function CheckoutPage() {
       /* Refresh products so cashier sees updated stock counts immediately */
       try { await refreshProducts() } catch {}
       console.log("[CHECKOUT] Order saved successfully:", orderNumber)
-      toast.success(`Order ${orderNumber} saved`, {
-        description: `${printData.items.length} item${printData.items.length === 1 ? "" : "s"} · ₱${grandTotal.toFixed(2)} · ${paymentMethod.toUpperCase()}`,
-      })
+      // No toast notification for cashier - go straight to receipt page
     } catch (err) {
       console.error("[CHECKOUT] recordSale failed:", err)
       if (err instanceof Error && err.message === "STOCK_REJECTED") throw err

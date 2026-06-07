@@ -5,7 +5,7 @@ import pool from "@/lib/db"
 
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions)
-  console.log("[SALES/MY] Session check:", { hasSession: !!session, hasUser: !!session?.user, userId: session?.user?.id, username: (session.user as any)?.username, name: session.user?.name })
+  console.log("[SALES/MY] Session check:", { hasSession: !!session, hasUser: !!session?.user, userId: session?.user?.id, username: session?.user ? (session.user as any)?.username : null, name: session?.user?.name })
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
@@ -22,7 +22,7 @@ export async function GET(request: Request) {
          COUNT(*)::int AS count,
          COALESCE(SUM(grand_total), 0)::float AS total
        FROM public.sales
-       WHERE (created_by = $1 OR server_name = $1)
+       WHERE created_by = $1
          AND DATE(created_at AT TIME ZONE 'Asia/Manila') = $2::date
        GROUP BY COALESCE(status, 'completed')
        ORDER BY COALESCE(status, 'completed')`,
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
          payment_method, server_name, created_by,
          status, void_reason, created_at
        FROM public.sales
-       WHERE (created_by = $1 OR server_name = $1)
+       WHERE created_by = $1
          AND DATE(created_at AT TIME ZONE 'Asia/Manila') = $2::date
        ORDER BY created_at DESC`,
       [username, date]

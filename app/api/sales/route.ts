@@ -159,7 +159,7 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions)
-  console.log("[SALES/GET] Admin session check:", { hasSession: !!session, hasUser: !!session?.user, userId: session?.user?.id, userRole: (session.user as any)?.role })
+  console.log("[SALES/GET] Admin session check:", { hasSession: !!session, hasUser: !!session?.user, userId: session?.user?.id, userRole: session?.user ? (session.user as any)?.role : null })
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
