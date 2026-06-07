@@ -215,7 +215,7 @@ export default function AdminPage() {
   const lastSeenOrderIdRef = useRef<string | null>(null)
   useEffect(() => {
     if (status !== "authenticated" || !isAdmin) return
-    const today = new Date().toLocaleDateString("en-CA")
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
     let cancelled = false
 
     const poll = async () => {

@@ -366,8 +366,13 @@ export async function printToRawBT(role: PrinterRole, data: Uint8Array): Promise
   if (!printerName) return false
 
   try {
-    // Convert Uint8Array to base64
-    const base64 = btoa(String.fromCharCode(...data))
+    // Convert Uint8Array to base64 with chunking for large payloads
+    let base64 = ''
+    const chunkSize = 0x8000 // 32KB chunks to avoid stack overflow
+    for (let i = 0; i < data.length; i += chunkSize) {
+      const chunk = data.subarray(i, i + chunkSize)
+      base64 += btoa(String.fromCharCode(...chunk))
+    }
     // RawBT intent URL format: rawbt:data:text/plain;base64,{data}?printer={name}
     const intentUrl = `rawbt:data:text/plain;base64,${base64}?printer=${encodeURIComponent(printerName)}`
     
@@ -379,7 +384,11 @@ export async function printToRawBT(role: PrinterRole, data: Uint8Array): Promise
     
     // Clean up iframe after a short delay
     setTimeout(() => {
-      document.body.removeChild(iframe)
+      try {
+        if (iframe.parentNode) document.body.removeChild(iframe)
+      } catch {
+        // Ignore cleanup errors
+      }
     }, 100)
     
     return true
