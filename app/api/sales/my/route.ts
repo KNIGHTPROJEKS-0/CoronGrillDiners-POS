@@ -5,6 +5,7 @@ import pool from "@/lib/db"
 
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions)
+  console.log("[SALES/MY] Session check:", { hasSession: !!session, hasUser: !!session?.user, userId: session?.user?.id, username: (session.user as any)?.username, name: session.user?.name })
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
@@ -12,6 +13,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const date = searchParams.get("date") || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
   const username = (session.user as any).username ?? session.user.name
+  console.log("[SALES/MY] Fetching sales for:", { username, date })
 
   try {
     const statsResult = await pool.query(
@@ -42,6 +44,7 @@ export async function GET(request: Request) {
        ORDER BY created_at DESC`,
       [username, date]
     )
+    console.log("[SALES/MY] Query results:", { statsCount: statsResult.rows.length, ordersCount: ordersResult.rows.length, orders: ordersResult.rows.map(o => ({ id: o.id, order_number: o.order_number, created_by: o.created_by, server_name: o.server_name })) })
 
     return NextResponse.json({
       date,

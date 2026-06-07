@@ -158,6 +158,7 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions)
+  console.log("[SALES/GET] Admin session check:", { hasSession: !!session, hasUser: !!session?.user, userId: session?.user?.id, userRole: (session.user as any)?.role })
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
@@ -168,6 +169,7 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const date = searchParams.get("date") || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
+    console.log("[SALES/GET] Admin fetching sales for date:", date)
 
     const [dailyStats, paymentBreakdown, recentOrders] = await Promise.all([
       pool.query(
@@ -208,6 +210,12 @@ export async function GET(request: Request) {
         [date]
       ),
     ])
+    console.log("[SALES/GET] Admin query results:", { 
+      totalOrders: dailyStats.rows[0]?.total_orders,
+      completedOrders: dailyStats.rows[0]?.completed_orders,
+      recentOrdersCount: recentOrders.rows.length,
+      recentOrders: recentOrders.rows.map(o => ({ id: o.id, order_number: o.order_number, created_by: o.created_by, server_name: o.server_name }))
+    })
 
     return NextResponse.json({
       date,
