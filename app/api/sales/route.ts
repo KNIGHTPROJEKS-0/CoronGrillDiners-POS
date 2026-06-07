@@ -23,10 +23,11 @@ export async function POST(request: Request) {
       amountTendered,
       changeAmount,
       serverName,
+      createdBy,
       shiftId,
     } = body
 
-    const sessionUsername = (session.user as any).username ?? session.user.name ?? serverName
+    const sessionUsername = createdBy ?? (session.user as any).username ?? session.user.name ?? serverName
 
     /* Transaction: validate stock + decrement atomically + insert the sale.
        NULL stock = untracked (unlimited) → never decremented.
