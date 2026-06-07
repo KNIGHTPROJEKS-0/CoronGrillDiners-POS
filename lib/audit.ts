@@ -24,7 +24,8 @@ export async function logEvent(
     await pool.query(
       `INSERT INTO public.admin_audit_log
          (action, actor_id, actor_username, target_user_id, target_username, details)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (id) DO NOTHING`,
       [
         action,
         Number(actor.id),

@@ -40,10 +40,12 @@ export async function POST(request: Request) {
        so concurrent checkouts can't oversell. If any tracked product is
        short, we ROLLBACK and return 409 with the offending item's name. */
     const client = await pool.connect()
+    console.log("[SALES API] Database connected successfully")
     let sale: any
     let alreadySaved = false
     try {
       await client.query("BEGIN")
+      console.log("[SALES API] Transaction started")
 
       if (Array.isArray(items)) {
         // Aggregate duplicate item IDs so we charge total quantity once
@@ -54,6 +56,7 @@ export async function POST(request: Request) {
           if (!pid || !qty || qty <= 0) continue
           aggregated.set(pid, (aggregated.get(pid) ?? 0) + qty)
         }
+        console.log("[SALES API] Stock validation for items:", Array.from(aggregated.entries()))
         for (const [pid, qty] of aggregated) {
           const upd = await client.query(
             `UPDATE public.products
@@ -71,6 +74,7 @@ export async function POST(request: Request) {
             )
             const row = check.rows[0]
             if (!row) {
+              console.error("[SALES API] Product not found:", pid)
               await client.query("ROLLBACK")
               return NextResponse.json(
                 { error: `Product #${pid} not found` },
@@ -78,6 +82,7 @@ export async function POST(request: Request) {
               )
             }
             if (row.stock !== null && row.stock !== undefined) {
+              console.error("[SALES API] Insufficient stock:", { pid, name: row.name, have: row.stock, need: qty })
               await client.query("ROLLBACK")
               return NextResponse.json(
                 { error: `Insufficient stock for ${row.name} (have ${row.stock}, need ${qty})` },
@@ -87,8 +92,24 @@ export async function POST(request: Request) {
             /* stock IS NULL → untracked, no decrement needed */
           }
         }
+        console.log("[SALES API] Stock validation passed")
       }
 
+      console.log("[SALES API] Attempting to insert sale into database")
+      console.log("[SALES API] INSERT values:", {
+        orderNumber,
+        itemCount: Array.isArray(items) ? items.length : 0,
+        subtotal,
+        serviceCharge,
+        grandTotal,
+        paymentMethod,
+        amountTendered,
+        changeAmount,
+        serverName,
+        sessionUsername,
+        discountPercent,
+        shiftId,
+      })
       const result = await client.query(
         `INSERT INTO public.sales
           (order_number, items, subtotal, service_charge, grand_total, payment_method, amount_tendered, change_amount, server_name, created_by, status, discount_percent, shift_id)
