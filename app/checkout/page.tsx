@@ -404,26 +404,17 @@ export default function CheckoutPage() {
       await recordSale()
       setShowSummaryModal(false)
       
-      // Try RawBT first (Android)
-      const cashierReceipt = buildCustomerReceipt(printData)
-      const kitchenTicket = buildKitchenTicket(printData)
-      
-      const cashierRawbtSuccess = await printToRawBT("cashier", cashierReceipt)
-      if (cashierRawbtSuccess && withKitchenTicket) {
-        await printToRawBT("kitchen", kitchenTicket)
-      }
-      
-      // Fall back to USB/Bluetooth if RawBT not configured or failed
-      if (!cashierRawbtSuccess && cashierPrinter.connected) {
-        await printTo("cashier", cashierReceipt)
-        if (withKitchenTicket) await printTo("kitchen", kitchenTicket)
-      }
-      
-      finishOrder(200)
-    } catch {
-      /* recordSale threw (e.g. STOCK_REJECTED — already toasted). Keep modal open. */
-    } finally {
+      // Store receipt data and navigate to receipt page for printing
+      // This ensures database save completes before any printing attempts
+      completingRef.current = true
+      storeReceiptData(printData, isAdmin ? "/pos" : "/", withKitchenTicket)
+      invalidateSnapshot()
       setIsBusy(false)
+      clearCart()
+      router.push("/receipt")
+    } catch {
+      setIsBusy(false)
+      // recordSale threw (e.g. STOCK_REJECTED — already toasted). Keep modal open.
     }
   }
 

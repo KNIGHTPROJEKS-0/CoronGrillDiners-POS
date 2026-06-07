@@ -360,7 +360,7 @@ export function clearRawBTPrinter(role: PrinterRole) {
   try { localStorage.removeItem(`cgd_rawbt_${role}`) } catch { /* SSR */ }
 }
 
-/** Print using RawBT intent URL. Opens RawBT app on Android. */
+/** Print using RawBT intent URL. Opens RawBT app on Android using hidden iframe. */
 export async function printToRawBT(role: PrinterRole, data: Uint8Array): Promise<boolean> {
   const printerName = loadRawBTPrinter(role)
   if (!printerName) return false
@@ -371,8 +371,17 @@ export async function printToRawBT(role: PrinterRole, data: Uint8Array): Promise
     // RawBT intent URL format: rawbt:data:text/plain;base64,{data}?printer={name}
     const intentUrl = `rawbt:data:text/plain;base64,${base64}?printer=${encodeURIComponent(printerName)}`
     
-    // Open intent URL - this will launch RawBT app on Android
-    window.location.href = intentUrl
+    // Use hidden iframe to trigger intent without breaking React state
+    const iframe = document.createElement('iframe')
+    iframe.style.display = 'none'
+    iframe.src = intentUrl
+    document.body.appendChild(iframe)
+    
+    // Clean up iframe after a short delay
+    setTimeout(() => {
+      document.body.removeChild(iframe)
+    }, 100)
+    
     return true
   } catch {
     return false

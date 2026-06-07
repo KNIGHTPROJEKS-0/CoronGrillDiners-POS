@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { printTo } from '@/lib/printer-connection'
+import { printTo, printToRawBT } from '@/lib/printer-connection'
 import { buildCustomerReceipt, buildKitchenTicket, type PrintData } from '@/lib/escpos'
 
 const STORAGE_KEY = 'cgd_active_receipt'
@@ -45,7 +45,7 @@ export default function ReceiptPage() {
     } catch {}
   }, [])
 
-  // ── Auto-print on mount via direct BLE/USB ───────────────────────────────────
+  // ── Auto-print on mount via RawBT (safe iframe) or direct BLE/USB ─────────────
   // /receipt is navigated to in the SAME browser tab (router.push from checkout),
   // so the module-level btChars state in lib/printer-connection.ts is preserved
   // and printTo() can reach both printers without any RawBT bridge.
@@ -57,8 +57,15 @@ export default function ReceiptPage() {
     if (!pd) return
     const finalPd = pd
     ;(async () => {
-      const cashierResult = await printTo('cashier', buildCustomerReceipt(finalPd))
-      const cashierOk = cashierResult !== 'none'
+      // Try RawBT first (safe iframe method)
+      const cashierRawbtSuccess = await printToRawBT('cashier', buildCustomerReceipt(finalPd))
+      let cashierOk = cashierRawbtSuccess
+      
+      // Fall back to direct BLE/USB if RawBT not configured
+      if (!cashierOk) {
+        const cashierResult = await printTo('cashier', buildCustomerReceipt(finalPd))
+        cashierOk = cashierResult !== 'none'
+      }
       if (cashierOk) setCashierDone(true)
 
       // Auto-print kitchen only when the cashier explicitly opted in via the
@@ -66,8 +73,15 @@ export default function ReceiptPage() {
       // visible either way so the cashier can manually print on demand.
       let kitchenOk = false
       if (entry.autoPrintKitchen) {
-        const kitchenResult = await printTo('kitchen', buildKitchenTicket(finalPd))
-        kitchenOk = kitchenResult !== 'none'
+        // Try RawBT first for kitchen
+        const kitchenRawbtSuccess = await printToRawBT('kitchen', buildKitchenTicket(finalPd))
+        kitchenOk = kitchenRawbtSuccess
+        
+        // Fall back to direct BLE/USB if RawBT not configured
+        if (!kitchenOk) {
+          const kitchenResult = await printTo('kitchen', buildKitchenTicket(finalPd))
+          kitchenOk = kitchenResult !== 'none'
+        }
         if (kitchenOk) setKitchenDone(true)
       }
 
@@ -88,6 +102,10 @@ export default function ReceiptPage() {
   async function doPrintCashier() {
     const pd = getPrintData()
     if (!pd) return
+    // Try RawBT first (safe iframe method)
+    const rawbtSuccess = await printToRawBT('cashier', buildCustomerReceipt(pd))
+    if (rawbtSuccess) { setCashierDone(true); return }
+    // Fall back to direct BLE/USB
     const result = await printTo('cashier', buildCustomerReceipt(pd))
     if (result !== 'none') { setCashierDone(true); return }
     // No direct BLE/USB — share cashier receipt text via Android share sheet → RawBT
@@ -103,6 +121,10 @@ export default function ReceiptPage() {
   async function doPrintKitchen() {
     const pd = getPrintData()
     if (!pd) return
+    // Try RawBT first (safe iframe method)
+    const rawbtSuccess = await printToRawBT('kitchen', buildKitchenTicket(pd))
+    if (rawbtSuccess) { setKitchenDone(true); return }
+    // Fall back to direct BLE/USB
     const result = await printTo('kitchen', buildKitchenTicket(pd))
     if (result !== 'none') { setKitchenDone(true); return }
     // No direct BLE/USB — share kitchen ticket text via Android share sheet → RawBT
