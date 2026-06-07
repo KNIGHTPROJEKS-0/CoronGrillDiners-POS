@@ -366,13 +366,9 @@ export async function printToRawBT(role: PrinterRole, data: Uint8Array): Promise
   if (!printerName) return false
 
   try {
-    // Convert Uint8Array to base64 with chunking for large payloads
-    let base64 = ''
-    const chunkSize = 0x8000 // 32KB chunks to avoid stack overflow
-    for (let i = 0; i < data.length; i += chunkSize) {
-      const chunk = data.subarray(i, i + chunkSize)
-      base64 += btoa(String.fromCharCode(...chunk))
-    }
+    // Convert Uint8Array to base64 using TextDecoder for proper UTF-8 encoding
+    const text = new TextDecoder().decode(data)
+    const base64 = btoa(text)
     // RawBT intent URL format: rawbt:data:text/plain;base64,{data}?printer={name}
     const intentUrl = `rawbt:data:text/plain;base64,${base64}?printer=${encodeURIComponent(printerName)}`
     

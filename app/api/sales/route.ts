@@ -27,6 +27,8 @@ export async function POST(request: Request) {
       shiftId,
     } = body
 
+    console.log("[SALES API] Received order:", { orderNumber, grandTotal, paymentMethod, shiftId, createdBy })
+
     const sessionUsername = createdBy ?? (session.user as any).username ?? session.user.name ?? serverName
 
     /* Transaction: validate stock + decrement atomically + insert the sale.
@@ -156,7 +158,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, sale })
   } catch (error) {
-    console.error("Failed to record sale:", error)
+    console.error("[SALES API] Failed to record sale:", error)
+    console.error("[SALES API] Error details:", {
+      message: (error as any)?.message,
+      code: (error as any)?.code,
+      detail: (error as any)?.detail,
+      stack: (error as any)?.stack,
+    })
     return NextResponse.json({ error: "Failed to record sale" }, { status: 500 })
   }
 }
