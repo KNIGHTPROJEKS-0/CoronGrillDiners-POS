@@ -366,9 +366,11 @@ export async function printToRawBT(role: PrinterRole, data: Uint8Array): Promise
   if (!printerName) return false
 
   try {
-    // Convert Uint8Array to base64 using TextDecoder for proper UTF-8 encoding
-    const text = new TextDecoder().decode(data)
-    const base64 = btoa(text)
+    // Convert Uint8Array directly to base64 (binary-safe, no TextDecoder)
+    // This preserves ESC/POS binary commands without corruption
+    const binaryString = String.fromCharCode.apply(null, Array.from(data))
+    const base64 = btoa(binaryString)
+    
     // RawBT intent URL format: rawbt:data:text/plain;base64,{data}?printer={name}
     const intentUrl = `rawbt:data:text/plain;base64,${base64}?printer=${encodeURIComponent(printerName)}`
     
