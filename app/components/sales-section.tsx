@@ -49,6 +49,8 @@ interface SaleRecord {
   status: string
   void_reason: string | null
   created_at: string
+  isOvernightShiftOrder?: boolean
+  overnightShiftLabel?: string | null
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -730,6 +732,11 @@ export default function SalesSection() {
                                 {(s.discount_percent ?? 0) > 0 && (
                                   <Badge className="text-[8px] bg-blue-100 text-blue-700 h-3 px-1 py-0">
                                     {s.discount_percent}%
+                                  </Badge>
+                                )}
+                                {s.isOvernightShiftOrder && s.overnightShiftLabel && (
+                                  <Badge className="text-[8px] bg-orange-100 text-orange-700 h-3 px-1 py-0">
+                                    {s.overnightShiftLabel}
                                   </Badge>
                                 )}
                               </td>

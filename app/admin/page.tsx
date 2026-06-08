@@ -45,6 +45,8 @@ interface ManagedOrder {
   discount_percent?: number
   payment_method: string; server_name: string; created_by: string
   created_at: string; status: string; void_reason: string | null
+  isOvernightShiftOrder?: boolean
+  overnightShiftLabel?: string | null
 }
 interface ShiftRecord {
   id: number; cashier_name: string; cashier_username: string
@@ -61,6 +63,8 @@ interface SaleRecord {
   discount_percent?: number
   payment_method: string; server_name: string; created_by: string
   status: string; void_reason: string | null; created_at: string
+  isOvernightShiftOrder?: boolean
+  overnightShiftLabel?: string | null
 }
 interface TrashOrder extends SaleRecord {
   deleted_at: string | null
@@ -823,6 +827,11 @@ function DashboardSection({ data, selectedDate, onRefresh }: { data: SalesData |
                         {(order.discount_percent ?? 0) > 0 && (
                           <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">
                             {order.discount_percent}% Senior Discount
+                          </span>
+                        )}
+                        {order.isOvernightShiftOrder && order.overnightShiftLabel && (
+                          <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-medium">
+                            {order.overnightShiftLabel}
                           </span>
                         )}
                       </div>

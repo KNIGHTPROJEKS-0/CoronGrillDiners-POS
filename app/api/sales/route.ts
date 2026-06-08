@@ -4,6 +4,26 @@ import { authOptions } from "@/lib/auth"
 import pool, { hasColumn, makeDeletedColumns, makeDeletedFilter } from "@/lib/db"
 import { logEvent } from "@/lib/audit"
 
+// Helper to compute overnight flags and labels
+function addOvernightFields(sale: any) {
+  let isOvernightShiftOrder = false
+  let overnightShiftLabel = null
+  if (sale.shift_start_time) {
+    const shiftDate = new Date(sale.shift_start_time)
+    const saleDate = new Date(sale.created_at)
+    // Convert both to Asia/Manila dates for comparison
+    const shiftCalendarDate = shiftDate.toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
+    const saleCalendarDate = saleDate.toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
+    isOvernightShiftOrder = shiftCalendarDate < saleCalendarDate
+    if (isOvernightShiftOrder) {
+      // Format shift date as "June 8"
+      overnightShiftLabel = shiftDate.toLocaleDateString("en-US", { timeZone: "Asia/Manila", month: "long", day: "numeric" })
+    }
+  }
+  const { shift_start_time, ...rest } = sale
+  return { ...rest, isOvernightShiftOrder, overnightShiftLabel }
+}
+
 const shiftSalesCache = new Map<string, { data: { dailyStats: any; paymentBreakdown: any; recentOrders: any }; expiresAt: number }>()
 const ACTIVE_SHIFT_CACHE_MS = 25 * 1000
 
@@ -55,17 +75,19 @@ async function queryShiftSalesForWindow(shiftWindow: { start: string; end: strin
     ),
     pool.query(
       `SELECT
-         id, order_number, items,
-         subtotal::float, service_charge::float, grand_total::float,
-         COALESCE(discount_percent, 0)::int AS discount_percent,
-         payment_method, server_name, created_by,
-         COALESCE(status, 'completed') AS status,
-         void_reason, created_at${deletedSelect}
-       FROM public.sales
-       WHERE created_at >= $1
-         AND ($2::timestamptz IS NULL OR created_at <= $2)
+         s.id, s.order_number, s.items,
+         s.subtotal::float, s.service_charge::float, s.grand_total::float,
+         COALESCE(s.discount_percent, 0)::int AS discount_percent,
+         s.payment_method, s.server_name, s.created_by,
+         COALESCE(s.status, 'completed') AS status,
+         s.void_reason, s.created_at,
+         sh.start_time AS shift_start_time${deletedSelect}
+       FROM public.sales s
+       LEFT JOIN public.shifts sh ON s.shift_id = sh.id
+       WHERE s.created_at >= $1
+         AND ($2::timestamptz IS NULL OR s.created_at <= $2)
          ${deletedFilter}
-       ORDER BY created_at DESC
+       ORDER BY s.created_at DESC
        LIMIT 50`,
       [start, endParam]
     ),
@@ -74,7 +96,7 @@ async function queryShiftSalesForWindow(shiftWindow: { start: string; end: strin
   return {
     dailyStats: dailyStats.rows[0],
     paymentBreakdown: paymentBreakdown.rows,
-    recentOrders: recentOrders.rows,
+    recentOrders: recentOrders.rows.map(addOvernightFields),
   }
 }
 
@@ -316,20 +338,26 @@ export async function GET(request: Request) {
         ),
         pool.query(
           `SELECT
-             id, order_number, items,
-             subtotal::float, service_charge::float, grand_total::float,
-             COALESCE(discount_percent, 0)::int AS discount_percent,
-             payment_method, server_name, created_by,
-             COALESCE(status, 'completed') AS status,
-             void_reason, created_at${deletedSelect}
-           FROM public.sales
-           WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1
+             s.id, s.order_number, s.items,
+             s.subtotal::float, s.service_charge::float, s.grand_total::float,
+             COALESCE(s.discount_percent, 0)::int AS discount_percent,
+             s.payment_method, s.server_name, s.created_by,
+             COALESCE(s.status, 'completed') AS status,
+             s.void_reason, s.created_at,
+             sh.start_time AS shift_start_time${deletedSelect}
+           FROM public.sales s
+           LEFT JOIN public.shifts sh ON s.shift_id = sh.id
+           WHERE DATE(s.created_at AT TIME ZONE 'Asia/Manila') = $1
              ${deletedFilter}
-           ORDER BY created_at DESC
+           ORDER BY s.created_at DESC
            LIMIT 50`,
           [date]
         ),
       ])
+      // Map recentOrders to add overnight fields
+      if (recentOrders) {
+        recentOrders = { rows: recentOrders.rows.map(addOvernightFields) }
+      }
     }
     const safeDailyStats = dailyStats ?? { rows: [{ total_orders: 0, completed_orders: 0, total_sales: 0, total_subtotal: 0, total_service_charge: 0 }] }
     const safePaymentBreakdown = paymentBreakdown ?? { rows: [] }

@@ -88,7 +88,10 @@ export async function GET(request: Request) {
          s.total_cash_sales::float, s.total_sales::float,
          s.expected_cash::float, s.discrepancy::float
        FROM public.shifts s
-       WHERE DATE(s.start_time AT TIME ZONE 'Asia/Manila') = $1
+       WHERE (
+         DATE(s.start_time AT TIME ZONE 'Asia/Manila') = $1
+         OR s.status = 'open'
+       )
          AND ($2 = true OR COALESCE(s.archived, false) = false)
        ORDER BY s.start_time DESC
        LIMIT $3`,
