@@ -76,4 +76,46 @@ function buildPoolConfig(): PoolConfig {
 
 const pool = new Pool(buildPoolConfig())
 
+const columnExistsCache = new Map<string, boolean>()
+
+export async function hasColumn(tableName: string, columnName: string) {
+  const cacheKey = `${tableName}.${columnName}`
+  if (columnExistsCache.has(cacheKey)) {
+    return columnExistsCache.get(cacheKey)!
+  }
+
+  const result = await pool.query(
+    `SELECT 1
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = $1
+       AND column_name = $2
+     LIMIT 1`,
+    [tableName, columnName]
+  )
+
+  const exists = result.rows.length > 0
+  columnExistsCache.set(cacheKey, exists)
+  return exists
+}
+
+export function makeDeletedFilter(hasIsDeleted: boolean, deleted: boolean, alias = "public.sales") {
+  if (!hasIsDeleted) {
+    return deleted ? "AND false" : ""
+  }
+  return deleted
+    ? `AND COALESCE(${alias}.is_deleted, false) = true`
+    : `AND COALESCE(${alias}.is_deleted, false) = false`
+}
+
+export function makeDeletedColumns(hasDeletedAt: boolean, hasDeletedBy: boolean, alias?: string) {
+  const prefix = alias ? `${alias}.` : ""
+  return [
+    hasDeletedAt ? `${prefix}deleted_at` : null,
+    hasDeletedBy ? `${prefix}deleted_by` : null,
+  ]
+    .filter(Boolean)
+    .join(", ")
+}
+
 export default pool

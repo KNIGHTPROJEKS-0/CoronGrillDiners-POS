@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import pool from "@/lib/db"
+import pool, { hasColumn, makeDeletedFilter } from "@/lib/db"
 import { logEvent } from "@/lib/audit"
 
 export async function GET() {
@@ -23,6 +23,9 @@ export async function GET() {
       [session.user.id]
     )
 
+    const hasIsDeleted = await hasColumn("sales", "is_deleted")
+    const deletedFilter = makeDeletedFilter(hasIsDeleted, false)
+
     for (const stale of staleResult.rows) {
       // Calculate actual sales that occurred during the stale shift
       const salesRes = await pool.query(
@@ -33,7 +36,7 @@ export async function GET() {
          WHERE (created_by = $1 OR created_by = $2)
            AND created_at >= $3
            AND COALESCE(status, 'completed') = 'completed'
-           AND COALESCE(is_deleted, false) = false`,
+           ${deletedFilter}`,
         [stale.cashier_name, stale.cashier_username, stale.start_time]
       )
       const { cash_sales, total_sales } = salesRes.rows[0]
@@ -83,7 +86,7 @@ export async function GET() {
          WHERE (created_by = s.cashier_name OR created_by = s.cashier_username)
            AND created_at >= s.start_time
            AND COALESCE(status, 'completed') = 'completed'
-           AND COALESCE(is_deleted, false) = false
+           ${deletedFilter}
        ) sal ON true
        WHERE s.cashier_id = $1::integer
          AND s.status = 'open'

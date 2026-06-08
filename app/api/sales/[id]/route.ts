@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import pool from "@/lib/db"
+import pool, { hasColumn } from "@/lib/db"
 import { logEvent } from "@/lib/audit"
 
 export async function PATCH(
@@ -32,18 +32,45 @@ export async function PATCH(
       if (saleMeta.rows.length === 0) {
         return NextResponse.json({ error: "Sale not found" }, { status: 404 })
       }
+      const hasIsDeleted = await hasColumn("sales", "is_deleted")
+      const hasDeletedAt = await hasColumn("sales", "deleted_at")
+      const hasDeletedBy = await hasColumn("sales", "deleted_by")
+
+      if (!hasIsDeleted) {
+        return NextResponse.json(
+          { error: "Soft delete support is not available in the current database schema" },
+          { status: 501 }
+        )
+      }
+
       const prevStatus = saleMeta.rows[0].status ?? "completed"
       const paymentMethod = saleMeta.rows[0].payment_method
       const grandTotal = Number(saleMeta.rows[0].grand_total || 0)
       const shiftId = saleMeta.rows[0].shift_id
+
+      const updateClauses = ["is_deleted = $1"]
+      const returningColumns = ["id", "order_number", "is_deleted"]
+      const queryValues = [isDeleted]
+      let paramIndex = 2
+
+      if (hasDeletedAt) {
+        updateClauses.push("deleted_at = CASE WHEN $1 THEN NOW() ELSE NULL END")
+        returningColumns.push("deleted_at")
+      }
+      if (hasDeletedBy) {
+        updateClauses.push(`deleted_by = CASE WHEN $1 THEN $${paramIndex} ELSE NULL END`)
+        returningColumns.push("deleted_by")
+        queryValues.push(username)
+        paramIndex += 1
+      }
+
+      queryValues.push(id)
       const result = await pool.query(
         `UPDATE public.sales
-         SET is_deleted = $1,
-             deleted_at = CASE WHEN $1 THEN NOW() ELSE NULL END,
-             deleted_by = CASE WHEN $1 THEN $2 ELSE NULL END
-         WHERE id = $3
-         RETURNING id, order_number, is_deleted, deleted_at, deleted_by`,
-        [isDeleted, username, id]
+         SET ${updateClauses.join(",\n             ")}
+         WHERE id = $${paramIndex}
+         RETURNING ${returningColumns.join(", ")}`,
+        queryValues
       )
       if (result.rows.length === 0) {
         return NextResponse.json({ error: "Sale not found" }, { status: 404 })
@@ -256,14 +283,39 @@ export async function DELETE(
       return NextResponse.json({ success: true, deleted: sale })
     }
 
+    const hasIsDeleted = await hasColumn("sales", "is_deleted")
+    const hasDeletedAt = await hasColumn("sales", "deleted_at")
+    const hasDeletedBy = await hasColumn("sales", "deleted_by")
+
+    if (!hasIsDeleted) {
+      return NextResponse.json(
+        { error: "Soft delete support is not available in the current database schema" },
+        { status: 501 }
+      )
+    }
+
+    const deleteClauses = ["is_deleted = true"]
+    const returningColumns = ["id", "order_number", "grand_total"]
+    const queryValues = [id]
+    let paramIndex = 2
+
+    if (hasDeletedAt) {
+      deleteClauses.push("deleted_at = NOW()")
+      returningColumns.push("deleted_at")
+    }
+    if (hasDeletedBy) {
+      deleteClauses.push(`deleted_by = $${paramIndex}`)
+      returningColumns.push("deleted_by")
+      queryValues.push((session.user as any).username ?? session.user.name)
+      paramIndex += 1
+    }
+
     const result = await pool.query(
       `UPDATE public.sales
-       SET is_deleted = true,
-           deleted_at = NOW(),
-           deleted_by = $2
+       SET ${deleteClauses.join(",\n           ")}
        WHERE id = $1
-       RETURNING id, order_number, grand_total, deleted_at, deleted_by`,
-      [id, (session.user as any).username ?? session.user.name]
+       RETURNING ${returningColumns.join(", ")}`,
+      queryValues
     )
     if (result.rows.length === 0) {
       return NextResponse.json({ error: "Sale not found" }, { status: 404 })

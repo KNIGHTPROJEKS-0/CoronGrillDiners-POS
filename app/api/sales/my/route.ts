@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import pool from "@/lib/db"
+import pool, { hasColumn, makeDeletedFilter } from "@/lib/db"
 
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions)
@@ -47,6 +47,9 @@ export async function GET(request: Request) {
     // ── Step 3: Filter orders by current shift (created_at between shift start and end) ──
     const shiftStart = currentShift.start_time
     const shiftEnd = currentShift.end_time ?? null
+    const hasIsDeleted = await hasColumn("sales", "is_deleted")
+    const deletedFilter = makeDeletedFilter(hasIsDeleted, false)
+
     const statsResult = await pool.query(
       `SELECT
          COALESCE(status, 'completed') AS status,
@@ -56,7 +59,7 @@ export async function GET(request: Request) {
        WHERE created_by = $1
         AND created_at >= $2
         AND ($3::timestamptz IS NULL OR created_at <= $3)
-         AND COALESCE(is_deleted, false) = false
+        ${deletedFilter}
        GROUP BY COALESCE(status, 'completed')
        ORDER BY COALESCE(status, 'completed')`,
       [username, shiftStart, shiftEnd]
@@ -75,7 +78,7 @@ export async function GET(request: Request) {
        WHERE created_by = $1
         AND created_at >= $2
         AND ($3::timestamptz IS NULL OR created_at <= $3)
-         AND COALESCE(is_deleted, false) = false
+        ${deletedFilter}
        ORDER BY created_at DESC`,
       [username, shiftStart, shiftEnd]
     )

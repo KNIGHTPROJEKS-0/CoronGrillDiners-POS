@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import pool from "@/lib/db"
+import pool, { hasColumn, makeDeletedColumns, makeDeletedFilter } from "@/lib/db"
 import { logEvent } from "@/lib/audit"
 
 const shiftSalesCache = new Map<string, { data: { dailyStats: any; paymentBreakdown: any; recentOrders: any }; expiresAt: number }>()
@@ -17,7 +17,12 @@ function getShiftSalesCacheKey(shiftId: string, deleted: boolean) {
 }
 
 async function queryShiftSalesForWindow(shiftWindow: { start: string; end: string | null }, deleted: boolean) {
-  const deletedFilter = deleted ? "AND COALESCE(is_deleted, false) = true" : "AND COALESCE(is_deleted, false) = false"
+  const hasIsDeleted = await hasColumn("sales", "is_deleted")
+  const hasDeletedAt = await hasColumn("sales", "deleted_at")
+  const hasDeletedBy = await hasColumn("sales", "deleted_by")
+  const deletedFilter = makeDeletedFilter(hasIsDeleted, deleted)
+  const deletedColumns = makeDeletedColumns(hasDeletedAt, hasDeletedBy)
+  const deletedSelect = deletedColumns ? `, ${deletedColumns}` : ""
   const start = shiftWindow.start
   const endParam = shiftWindow.end ?? null
   const [dailyStats, paymentBreakdown, recentOrders] = await Promise.all([
@@ -55,8 +60,7 @@ async function queryShiftSalesForWindow(shiftWindow: { start: string; end: strin
          COALESCE(discount_percent, 0)::int AS discount_percent,
          payment_method, server_name, created_by,
          COALESCE(status, 'completed') AS status,
-         void_reason, created_at,
-         deleted_at, deleted_by
+         void_reason, created_at${deletedSelect}
        FROM public.sales
        WHERE created_at >= $1
          AND ($2::timestamptz IS NULL OR created_at <= $2)
@@ -260,7 +264,12 @@ export async function GET(request: Request) {
     const date = searchParams.get("date") || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
     const shiftId = searchParams.get("shiftId")
     const deleted = searchParams.get("deleted") === "true"
-    const deletedFilter = deleted ? "AND COALESCE(is_deleted, false) = true" : "AND COALESCE(is_deleted, false) = false"
+    const hasIsDeleted = await hasColumn("sales", "is_deleted")
+    const hasDeletedAt = await hasColumn("sales", "deleted_at")
+    const hasDeletedBy = await hasColumn("sales", "deleted_by")
+    const deletedFilter = makeDeletedFilter(hasIsDeleted, deleted)
+    const deletedColumns = makeDeletedColumns(hasDeletedAt, hasDeletedBy)
+    const deletedSelect = deletedColumns ? `, ${deletedColumns}` : ""
     console.log("[SALES/GET] Admin fetching sales for date:", date, { deleted, shiftId })
 
     let dailyStats: { rows: any[] } | undefined
@@ -312,8 +321,7 @@ export async function GET(request: Request) {
              COALESCE(discount_percent, 0)::int AS discount_percent,
              payment_method, server_name, created_by,
              COALESCE(status, 'completed') AS status,
-             void_reason, created_at,
-             deleted_at, deleted_by
+             void_reason, created_at${deletedSelect}
            FROM public.sales
            WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1
              ${deletedFilter}

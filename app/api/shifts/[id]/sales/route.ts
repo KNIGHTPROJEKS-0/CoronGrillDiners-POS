@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import pool from "@/lib/db"
+import pool, { hasColumn, makeDeletedFilter } from "@/lib/db"
 
 export async function GET(
   request: Request,
@@ -28,6 +28,8 @@ export async function GET(
 
     const shift = shiftResult.rows[0]
     const endTime = shift.end_time ?? new Date().toISOString()
+    const hasIsDeleted = await hasColumn("sales", "is_deleted")
+    const deletedFilter = makeDeletedFilter(hasIsDeleted, false)
 
     const salesResult = await pool.query(
       `SELECT
@@ -40,7 +42,7 @@ export async function GET(
        WHERE (created_by = $1 OR created_by = $2 OR server_name = $1 OR server_name = $2)
          AND created_at >= $3
          AND created_at <= $4
-         AND COALESCE(is_deleted, false) = false
+         ${deletedFilter}
        ORDER BY created_at ASC`,
       [shift.cashier_name, shift.cashier_username, shift.start_time, endTime]
     )

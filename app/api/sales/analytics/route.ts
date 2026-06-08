@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import pool from "@/lib/db"
+import pool, { hasColumn, makeDeletedFilter } from "@/lib/db"
 
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions)
@@ -13,6 +13,9 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const date = searchParams.get("date") || new Date().toISOString().split("T")[0]
 
+    const hasIsDeleted = await hasColumn("sales", "is_deleted")
+    const deletedFilter = makeDeletedFilter(hasIsDeleted, false)
+
     const [weeklyTrend, topItems] = await Promise.all([
       pool.query(
         `SELECT
@@ -23,7 +26,7 @@ export async function GET(request: Request) {
          WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') >= ($1::date - INTERVAL '6 days')
            AND DATE(created_at AT TIME ZONE 'Asia/Manila') <= $1::date
            AND COALESCE(status, 'completed') = 'completed'
-           AND COALESCE(is_deleted, false) = false
+           ${deletedFilter}
          GROUP BY DATE(created_at AT TIME ZONE 'Asia/Manila')
          ORDER BY date`,
         [date]
@@ -36,7 +39,7 @@ export async function GET(request: Request) {
          FROM public.sales, jsonb_array_elements(items) AS item
          WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1
            AND COALESCE(status, 'completed') = 'completed'
-           AND COALESCE(is_deleted, false) = false
+           ${deletedFilter}
          GROUP BY item->>'name'
          ORDER BY total_qty DESC
          LIMIT 8`,
