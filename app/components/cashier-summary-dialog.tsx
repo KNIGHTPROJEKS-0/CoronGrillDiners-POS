@@ -296,6 +296,10 @@ export default function CashierSummaryDialog({ open, onOpenChange, cashierName }
         receiptText,
         kitchenText,
         autoPrintKitchen: false,
+        // Reprint must NOT auto-print. Navigate to /receipt and let the cashier
+        // tap Print Cashier Receipt + Print Kitchen Ticket so both printers fire
+        // reliably on every reprint (auto-print could drop the kitchen printer).
+        autoPrint: false,
         orderNumber: order.order_number,
         printDataJson: JSON.stringify(printData),
         returnPath: "/",
