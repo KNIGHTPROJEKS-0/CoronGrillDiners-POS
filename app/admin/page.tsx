@@ -244,6 +244,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (status === "authenticated" && isAdmin && activeSection !== "menu" && activeSection !== "sales") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       refreshCurrent()
       if (activeSection === "dashboard") fetchShiftsForDate(selectedDate)
     }
@@ -251,6 +252,7 @@ export default function AdminPage() {
   }, [activeSection, selectedDate, status, isAdmin])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsMounted(true)
   }, [])
 
@@ -574,10 +576,12 @@ function DashboardSection({ data, selectedDate, onRefresh }: { data: SalesData |
   const [voidReason, setVoidReason] = useState("")
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setOrders(data?.recentOrders ?? [])
   }, [data])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAnalytics(null)
     fetch(`/api/sales/analytics?date=${selectedDate}`)
       .then(r => r.ok ? r.json() : null)
@@ -1117,6 +1121,7 @@ function ShiftsSection({ selectedDate, onRefresh }: { selectedDate: string; onRe
     }
   }, [selectedDate, showArchived])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { fetchShifts() }, [fetchShifts])
 
   const fetchShiftOrders = async (shiftId: number): Promise<SaleRecord[]> => {
@@ -1443,7 +1448,7 @@ function ShiftsSection({ selectedDate, onRefresh }: { selectedDate: string; onRe
                                 <OrderStatusBadge status={order.status} />
                                 {order.void_reason && (
                                   <span className="text-muted-foreground italic truncate max-w-[120px]" title={order.void_reason}>
-                                    "{order.void_reason}"
+                                    &quot;{order.void_reason}&quot;
                                   </span>
                                 )}
                               </div>
@@ -1598,24 +1603,87 @@ const ACTION_CATEGORY: Record<string, ActivityCategory> = {
 
 function AuditLogSection({ entries, onRefresh }: { entries: AuditEntry[], onRefresh: () => Promise<void> }) {
   const [filter, setFilter] = useState<ActivityCategory>("all")
-  const [archivingId, setArchivingId] = useState<number | null>(null)
+  const [busyId, setBusyId] = useState<number | null>(null)
+  const [bulkBusy, setBulkBusy] = useState<"archive-all" | "delete-all" | null>(null)
 
-  const handleArchive = async (entry: AuditEntry) => {
-    if (!confirm(`Are you sure you want to archive this log entry?`)) return
-    setArchivingId(entry.id)
+  // ── Per-row: archive (hide from active log) ────────────────────────────────
+  const handleArchiveRow = async (entry: AuditEntry) => {
+    if (!confirm("Archive this log entry? It will be hidden from the active log.")) return
+    setBusyId(entry.id)
+    try {
+      const res = await fetch("/api/audit-log", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: entry.id }),
+      })
+      if (res.ok) await onRefresh()
+      else console.error("Archive row failed:", await res.text())
+    } catch (err) {
+      console.error("Failed to archive audit log entry:", err)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  // ── Per-row: hard-delete ───────────────────────────────────────────────────
+  const handleDeleteRow = async (entry: AuditEntry) => {
+    if (!confirm(`Permanently delete this log entry?\n\nAction: ${entry.action}\nDetails: ${entry.details}\n\nThis cannot be undone.`)) return
+    setBusyId(entry.id)
     try {
       const res = await fetch("/api/audit-log", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: entry.id })
+        body: JSON.stringify({ id: entry.id }),
       })
-      if (res.ok) {
-        await onRefresh()
-      }
+      if (res.ok) await onRefresh()
+      else console.error("Delete row failed:", await res.text())
     } catch (err) {
-      console.error("Failed to archive audit log entry:", err)
+      console.error("Failed to delete audit log entry:", err)
     } finally {
-      setArchivingId(null)
+      setBusyId(null)
+    }
+  }
+
+  // ── Bulk: archive all active entries ──────────────────────────────────────
+  const handleArchiveAll = async () => {
+    if (!confirm(`Archive ALL ${entries.length} log entries?\n\nThey will be hidden from the active log but not deleted.`)) return
+    setBulkBusy("archive-all")
+    try {
+      const res = await fetch("/api/audit-log", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archiveAll: true }),
+      })
+      if (res.ok) await onRefresh()
+      else console.error("Archive all failed:", await res.text())
+    } catch (err) {
+      console.error("Failed to archive all entries:", err)
+    } finally {
+      setBulkBusy(null)
+    }
+  }
+
+  // ── Bulk: permanently delete all entries ──────────────────────────────────
+  const handleDeleteAll = async () => {
+    const confirmed = window.confirm(
+      `⚠️ PERMANENTLY DELETE ALL LOG HISTORY?\n\nThis will wipe all ${entries.length} entries from the database.\nThis action cannot be undone.\n\nType OK to confirm.`
+    )
+    if (!confirmed) return
+    // Second confirmation for destructive action
+    if (!window.confirm("Final confirmation: delete the entire activity log permanently?")) return
+    setBulkBusy("delete-all")
+    try {
+      const res = await fetch("/api/audit-log", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deleteAll: true }),
+      })
+      if (res.ok) await onRefresh()
+      else console.error("Delete all failed:", await res.text())
+    } catch (err) {
+      console.error("Failed to delete all entries:", err)
+    } finally {
+      setBulkBusy(null)
     }
   }
 
@@ -1626,13 +1694,50 @@ function AuditLogSection({ entries, onRefresh }: { entries: AuditEntry[], onRefr
   return (
     <div className="bg-white rounded-xl border shadow-sm">
       <div className="p-5 border-b">
+        {/* ── Header row: title + bulk action buttons ── */}
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <h2 className="font-semibold">Activity Log</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">All system activity — logins, orders, shifts, and menu changes</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              All system activity — logins, orders, shifts, and menu changes
+            </p>
           </div>
-          <span className="text-sm text-muted-foreground self-center">{visible.length} event{visible.length !== 1 ? "s" : ""}</span>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="text-sm text-muted-foreground">
+              {visible.length} event{visible.length !== 1 ? "s" : ""}
+            </span>
+            {/* Archive All */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-xs text-amber-700 border-amber-200 hover:bg-amber-50"
+              onClick={handleArchiveAll}
+              disabled={entries.length === 0 || bulkBusy !== null}
+              title="Archive all — hides entries from active log without deleting"
+            >
+              {bulkBusy === "archive-all"
+                ? <RefreshCw className="h-3 w-3 animate-spin" />
+                : <Archive className="h-3 w-3" />}
+              Archive All
+            </Button>
+            {/* Delete All */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-xs text-red-700 border-red-200 hover:bg-red-50"
+              onClick={handleDeleteAll}
+              disabled={entries.length === 0 || bulkBusy !== null}
+              title="Permanently delete all log history — cannot be undone"
+            >
+              {bulkBusy === "delete-all"
+                ? <RefreshCw className="h-3 w-3 animate-spin" />
+                : <Trash2 className="h-3 w-3" />}
+              Delete All
+            </Button>
+          </div>
         </div>
+
+        {/* ── Category filter pills ── */}
         <div className="flex gap-1.5 mt-3 flex-wrap">
           {CATEGORY_FILTERS.map(f => (
             <button
@@ -1649,13 +1754,18 @@ function AuditLogSection({ entries, onRefresh }: { entries: AuditEntry[], onRefr
           ))}
         </div>
       </div>
+
       {visible.length === 0 ? (
-        <EmptyState icon={History} message={filter === "all" ? "No activity recorded yet." : `No ${filter} activity recorded yet.`} />
+        <EmptyState
+          icon={History}
+          message={filter === "all" ? "No activity recorded yet." : `No ${filter} activity recorded yet.`}
+        />
       ) : (
         <div className="divide-y max-h-[600px] overflow-y-auto">
           {visible.map((entry) => {
             const meta = ACTION_META[entry.action] ?? { label: entry.action, icon: History, color: "text-gray-600 bg-gray-50" }
             const Icon = meta.icon
+            const isBusy = busyId === entry.id
             return (
               <div key={entry.id} className="flex items-start gap-4 px-5 py-3.5 hover:bg-gray-50">
                 <div className={`mt-0.5 flex-shrink-0 h-8 w-8 rounded-full flex items-center justify-center ${meta.color}`}>
@@ -1673,19 +1783,29 @@ function AuditLogSection({ entries, onRefresh }: { entries: AuditEntry[], onRefr
                   <p className="text-xs text-muted-foreground mt-0.5 break-words">{entry.details}</p>
                 </div>
                 <div className="flex-shrink-0 text-right flex flex-col gap-1 items-end">
+                  {/* Per-row action buttons */}
                   <div className="flex gap-1">
+                    {/* Archive (hide) */}
                     <Button
                       variant="outline"
                       size="sm"
-                      className="h-7 text-[10px] text-gray-500 hover:text-gray-700"
-                      onClick={() => handleArchive(entry)}
-                      disabled={archivingId === entry.id}
+                      className="h-7 w-7 p-0 text-gray-400 hover:text-amber-600 hover:border-amber-300"
+                      onClick={() => handleArchiveRow(entry)}
+                      disabled={isBusy}
+                      title="Archive — hide from active log"
                     >
-                      {archivingId === entry.id ? (
-                        <RefreshCw className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <Archive className="h-3 w-3" />
-                      )}
+                      {isBusy ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Archive className="h-3 w-3" />}
+                    </Button>
+                    {/* Hard-delete */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 w-7 p-0 text-gray-400 hover:text-red-600 hover:border-red-300"
+                      onClick={() => handleDeleteRow(entry)}
+                      disabled={isBusy}
+                      title="Delete permanently"
+                    >
+                      {isBusy ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
@@ -2200,7 +2320,7 @@ function ProductFormModal({
               placeholder="Leave blank for unlimited"
             />
             <p className="text-[11px] text-muted-foreground leading-tight">
-              Leave blank for unlimited. Set a number to track inventory — it decreases automatically with each sale. When it reaches 0 the item shows "Not Available" in the cashier POS.
+              Leave blank for unlimited. Set a number to track inventory — it decreases automatically with each sale. When it reaches 0 the item shows &quot;Not Available&quot; in the cashier POS.
             </p>
           </div>
 

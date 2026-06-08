@@ -13,7 +13,7 @@ export async function GET() {
   try {
     const result = await pool.query(
       `SELECT id, code, used_by, used_at, sale_id, created_at
-       FROM void_codes
+       FROM public.void_codes
        ORDER BY used_at IS NULL DESC, code ASC`
     )
     return NextResponse.json({ codes: result.rows })
@@ -53,7 +53,7 @@ export async function PUT() {
         code VARCHAR(20) UNIQUE NOT NULL,
         used_by VARCHAR(255),
         used_at TIMESTAMPTZ,
-        sale_id INTEGER REFERENCES public.sales(id),
+        sale_id TEXT REFERENCES public.sales(id),
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `)

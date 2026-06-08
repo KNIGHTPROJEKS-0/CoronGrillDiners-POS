@@ -146,7 +146,8 @@ export async function PATCH(request: Request) {
        FROM public.sales
        WHERE (created_by = $1 OR created_by = $2)
          AND created_at >= $3
-         AND COALESCE(status, 'completed') = 'completed'`,
+         AND COALESCE(status, 'completed') = 'completed'
+         AND COALESCE(is_deleted, false) = false`,
       [shift.cashier_name, shift.cashier_username, shift.start_time]
     )
 
