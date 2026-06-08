@@ -3,6 +3,11 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import pool, { hasColumn, makeDeletedFilter } from "@/lib/db"
 
+// Safe column checks cached per request
+async function safeHasShiftId() {
+  try { return await hasColumn("sales", "shift_id") } catch { return false }
+}
+
 // Helper to compute overnight flags and labels
 function addOvernightFields(sale: any) {
   let isOvernightShiftOrder = false
@@ -50,6 +55,11 @@ export async function GET(
     const endTime = shift.end_time ?? new Date().toISOString()
     const hasIsDeleted = await hasColumn("sales", "is_deleted")
     const deletedFilter = makeDeletedFilter(hasIsDeleted, false)
+    const hasShiftIdCol = await safeHasShiftId()
+
+    const shiftIdCondition = hasShiftIdCol ? "OR shift_id = $5" : ""
+    const salesParams: any[] = [shift.cashier_name, shift.cashier_username, shift.start_time, endTime]
+    if (hasShiftIdCol) salesParams.push(shift.id)
 
     const salesResult = await pool.query(
       `SELECT
@@ -60,12 +70,12 @@ export async function GET(
          status, void_reason, created_at,
          $3 AS shift_start_time
        FROM public.sales
-       WHERE (created_by = $1 OR created_by = $2 OR server_name = $1 OR server_name = $2)
+       WHERE (created_by = $1 OR created_by = $2 OR server_name = $1 OR server_name = $2 ${shiftIdCondition})
          AND created_at >= $3
          AND created_at <= $4
          ${deletedFilter}
        ORDER BY created_at ASC`,
-      [shift.cashier_name, shift.cashier_username, shift.start_time, endTime]
+      salesParams
     )
 
     return NextResponse.json({

@@ -317,9 +317,11 @@ ${shift.notes ? `<div class="section-title">Notes / Remarks</div><div class="not
 // ─── SalesSection ─────────────────────────────────────────────────────────────
 
 export default function SalesSection() {
-  const today = new Date().toLocaleDateString("en-CA")
-  const [dateFrom, setDateFrom] = useState(today)
-  const [dateTo, setDateTo]     = useState(today)
+  const today = new Date()
+  const sevenDaysAgo = new Date(today)
+  sevenDaysAgo.setDate(today.getDate() - 6)
+  const [dateFrom, setDateFrom] = useState(sevenDaysAgo.toLocaleDateString("en-CA"))
+  const [dateTo, setDateTo]     = useState(today.toLocaleDateString("en-CA"))
   const [shifts, setShifts]     = useState<ShiftWithStats[]>([])
   const [loading, setLoading]   = useState(false)
   const [fetchError, setFetchError] = useState(false)
