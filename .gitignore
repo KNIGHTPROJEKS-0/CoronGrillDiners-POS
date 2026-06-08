@@ -1,8 +1,12 @@
 # Dependencies
 node_modules
+.pnpm-store
 
 # Build outputs
 .next
+dist
+tsconfig.tsbuildinfo
+next-env.d.ts
 
 # Environment variables
 .env
@@ -12,6 +16,14 @@ node_modules
 # Temporary migration scripts
 scripts/migrate-neon-to-supabase.ts
 scripts/migrate-neon-to-supabase.js
+scripts/create-supabase-tables.js
+scripts/seed-accounts.js
+scripts/seed-products.js
+scripts/seed-staff.js
+scripts/setup-supabase.js
+
+# Vercel
+.vercel
 
 # Prisma
 prisma/migrations
