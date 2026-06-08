@@ -69,6 +69,7 @@ export async function GET(request: Request) {
     const shiftEnd = currentShift.end_time ?? null
     const hasIsDeleted = await hasColumn("sales", "is_deleted")
     const deletedFilter = makeDeletedFilter(hasIsDeleted, false)
+    const deletedFilterS = makeDeletedFilter(hasIsDeleted, false, "s")
 
     const statsResult = await pool.query(
       `SELECT
@@ -99,7 +100,7 @@ export async function GET(request: Request) {
        WHERE s.created_by = $1
         AND s.created_at >= $2
         AND ($3::timestamptz IS NULL OR s.created_at <= $3)
-        ${deletedFilter}
+        ${deletedFilterS}
        ORDER BY s.created_at DESC`,
       [username, shiftStart, shiftEnd]
     )

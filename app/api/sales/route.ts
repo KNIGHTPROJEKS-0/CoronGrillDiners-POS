@@ -41,7 +41,8 @@ async function queryShiftSalesForWindow(shiftWindow: { start: string; end: strin
   const hasDeletedAt = await hasColumn("sales", "deleted_at")
   const hasDeletedBy = await hasColumn("sales", "deleted_by")
   const deletedFilter = makeDeletedFilter(hasIsDeleted, deleted)
-  const deletedColumns = makeDeletedColumns(hasDeletedAt, hasDeletedBy)
+  const deletedFilterS = makeDeletedFilter(hasIsDeleted, deleted, "s")
+  const deletedColumns = makeDeletedColumns(hasDeletedAt, hasDeletedBy, "s")
   const deletedSelect = deletedColumns ? `, ${deletedColumns}` : ""
   const start = shiftWindow.start
   const endParam = shiftWindow.end ?? null
@@ -86,7 +87,7 @@ async function queryShiftSalesForWindow(shiftWindow: { start: string; end: strin
        LEFT JOIN public.shifts sh ON s.shift_id = sh.id
        WHERE s.created_at >= $1
          AND ($2::timestamptz IS NULL OR s.created_at <= $2)
-         ${deletedFilter}
+         ${deletedFilterS}
        ORDER BY s.created_at DESC
        LIMIT 50`,
       [start, endParam]
@@ -290,7 +291,8 @@ export async function GET(request: Request) {
     const hasDeletedAt = await hasColumn("sales", "deleted_at")
     const hasDeletedBy = await hasColumn("sales", "deleted_by")
     const deletedFilter = makeDeletedFilter(hasIsDeleted, deleted)
-    const deletedColumns = makeDeletedColumns(hasDeletedAt, hasDeletedBy)
+    const deletedFilterS = makeDeletedFilter(hasIsDeleted, deleted, "s")
+    const deletedColumns = makeDeletedColumns(hasDeletedAt, hasDeletedBy, "s")
     const deletedSelect = deletedColumns ? `, ${deletedColumns}` : ""
     console.log("[SALES/GET] Admin fetching sales for date:", date, { deleted, shiftId })
 
@@ -348,7 +350,7 @@ export async function GET(request: Request) {
            FROM public.sales s
            LEFT JOIN public.shifts sh ON s.shift_id = sh.id
            WHERE DATE(s.created_at AT TIME ZONE 'Asia/Manila') = $1
-             ${deletedFilter}
+             ${deletedFilterS}
            ORDER BY s.created_at DESC
            LIMIT 50`,
           [date]
