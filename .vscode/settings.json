@@ -1,0 +1,21 @@
+{
+  // Disable OWL (Odoo Web Library) diagnostics — this is a Next.js project,
+  // not an Odoo project. The OWL provider was generating 689 false-positive
+  // "Syntax error in expression" errors across all .ts/.tsx files.
+  "owl.diagnostics.enable": false,
+
+  // Ensure the TypeScript SDK from node_modules is used (not a global one)
+  "typescript.tsdk": "node_modules/typescript/lib",
+
+  // ESLint: validate both TS and TSX files
+  "eslint.validate": [
+    "typescript",
+    "typescriptreact"
+  ],
+
+  // Tell the editor which files belong to TypeScript for accurate IntelliSense
+  "files.associations": {
+    "*.ts": "typescript",
+    "*.tsx": "typescriptreact"
+  }
+}
