@@ -14,6 +14,7 @@ next-env.d.ts
 .env.*.local
 
 # Temporary migration scripts
+migration-data/
 scripts/migrate-neon-to-supabase.ts
 scripts/migrate-neon-to-supabase.js
 scripts/create-supabase-tables.js
