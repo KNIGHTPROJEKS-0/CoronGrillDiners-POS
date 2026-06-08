@@ -36,7 +36,7 @@ export async function GET(request: Request) {
   if (category === "account") {
     conditions.push(`action IN ('login','create_account','update_account','reset_password','delete_account','change_own_password')`)
   } else if (category === "order") {
-    conditions.push(`action IN ('order_placed','order_voided','order_restored','order_deleted')`)
+    conditions.push(`action IN ('order_placed','order_voided','order_restored','order_restored_from_trash','order_deleted','order_permanently_deleted')`)
   } else if (category === "shift") {
     conditions.push(`action IN ('shift_started','shift_closed')`)
   } else if (category === "menu") {

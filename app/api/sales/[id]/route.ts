@@ -15,13 +15,46 @@ export async function PATCH(
   }
 
   try {
-    const { status, voidReason } = await request.json()
+    const { status, voidReason, isDeleted } = await request.json()
+    const isAdmin = session.user.role === "admin"
+    const username = (session.user as any).username ?? session.user.name
+
+    if (isDeleted !== undefined) {
+      if (!isAdmin) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      }
+      const result = await pool.query(
+        `UPDATE public.sales
+         SET is_deleted = $1,
+             deleted_at = CASE WHEN $1 THEN NOW() ELSE NULL END,
+             deleted_by = CASE WHEN $1 THEN $2 ELSE NULL END
+         WHERE id = $3
+         RETURNING id, order_number, is_deleted, deleted_at, deleted_by`,
+        [isDeleted, username, id]
+      )
+      if (result.rows.length === 0) {
+        return NextResponse.json({ error: "Sale not found" }, { status: 404 })
+      }
+      const sale = result.rows[0]
+      if (isDeleted) {
+        logEvent(
+          "order_deleted",
+          { id: session.user.id!, username },
+          `Order ${sale.order_number} moved to trash by ${username}`
+        )
+      } else {
+        logEvent(
+          "order_restored_from_trash",
+          { id: session.user.id!, username },
+          `Order ${sale.order_number} restored from trash by ${username}`
+        )
+      }
+      return NextResponse.json({ sale })
+    }
+
     if (!["completed", "void", "cancelled"].includes(status)) {
       return NextResponse.json({ error: "Invalid status" }, { status: 400 })
     }
-
-    const isAdmin = session.user.role === "admin"
-    const username = (session.user as any).username ?? session.user.name
 
     /* Cashiers may only cancel their own orders via this endpoint.
        Voiding requires /api/void-codes (code-gated). */
@@ -138,7 +171,7 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
@@ -148,9 +181,37 @@ export async function DELETE(
   }
 
   try {
+    const { searchParams } = new URL(request.url)
+    const forceDelete = searchParams.get("force") === "true"
+
+    if (forceDelete) {
+      const result = await pool.query(
+        `DELETE FROM public.sales WHERE id = $1 RETURNING id, order_number, grand_total`,
+        [id]
+      )
+      if (result.rows.length === 0) {
+        return NextResponse.json({ error: "Sale not found" }, { status: 404 })
+      }
+
+      const sale = result.rows[0]
+      const username = (session.user as any).username ?? session.user.name
+      logEvent(
+        "order_permanently_deleted",
+        { id: session.user.id!, username },
+        `Order ${sale.order_number} permanently deleted (₱${Number(sale.grand_total).toFixed(2)})`
+      )
+
+      return NextResponse.json({ success: true, deleted: sale })
+    }
+
     const result = await pool.query(
-      `DELETE FROM public.sales WHERE id = $1 RETURNING id, order_number, grand_total`,
-      [id]
+      `UPDATE public.sales
+       SET is_deleted = true,
+           deleted_at = NOW(),
+           deleted_by = $2
+       WHERE id = $1
+       RETURNING id, order_number, grand_total, deleted_at, deleted_by`,
+      [id, (session.user as any).username ?? session.user.name]
     )
     if (result.rows.length === 0) {
       return NextResponse.json({ error: "Sale not found" }, { status: 404 })
@@ -161,7 +222,7 @@ export async function DELETE(
     logEvent(
       "order_deleted",
       { id: session.user.id!, username },
-      `Order ${sale.order_number} permanently deleted (₱${Number(sale.grand_total).toFixed(2)})`
+      `Order ${sale.order_number} moved to trash by ${username}`
     )
 
     return NextResponse.json({ success: true, deleted: sale })

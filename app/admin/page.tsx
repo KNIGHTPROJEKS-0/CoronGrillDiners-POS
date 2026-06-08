@@ -62,6 +62,10 @@ interface SaleRecord {
   payment_method: string; server_name: string; created_by: string
   status: string; void_reason: string | null; created_at: string
 }
+interface TrashOrder extends SaleRecord {
+  deleted_at: string | null
+  deleted_by: string | null
+}
 interface Product {
   id: number; name: string; price: number; category: string
   image: string | null; description?: string | null; available?: boolean
@@ -105,11 +109,12 @@ function PaymentIcon({ method }: { method: string }) {
 
 // ─── Sidebar nav items ────────────────────────────────────────────────────────
 
-type Section = "dashboard" | "shifts" | "sales" | "menu" | "staff" | "activity" | "security" | "void-codes"
+type Section = "dashboard" | "shifts" | "sales" | "trash" | "menu" | "staff" | "activity" | "security" | "void-codes"
 const NAV_ITEMS: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Dashboard",        icon: LayoutDashboard  },
   { id: "shifts",    label: "Shift Reports",    icon: Clock            },
   { id: "sales",     label: "Sales Summary",    icon: Receipt          },
+  { id: "trash",     label: "Trash",            icon: Trash2           },
   { id: "menu",      label: "Menu Management",  icon: UtensilsCrossed  },
   { id: "staff",     label: "Staff Accounts",   icon: Users            },
   { id: "activity",  label: "Activity Log",     icon: History          },
@@ -125,6 +130,7 @@ export default function AdminPage() {
   const [activeSection, setActiveSection] = useState<Section>("dashboard")
   const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString("en-CA"))
   const [salesData, setSalesData] = useState<SalesData | null>(null)
+  const [trashOrders, setTrashOrders] = useState<TrashOrder[]>([])
   const [staff, setStaff] = useState<StaffUser[]>([])
   const [auditLog, setAuditLog] = useState<AuditEntry[]>([])
   const [securityLog, setSecurityLog] = useState<AuditEntry[]>([])
@@ -166,6 +172,12 @@ export default function AdminPage() {
     const j = await res.json(); setVoidCodes(j.codes ?? [])
   }, [])
 
+  const fetchTrash = useCallback(async (date: string) => {
+    const res = await fetch(`/api/sales?deleted=true&date=${date}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const j = await res.json(); setTrashOrders(j.recentOrders ?? [])
+  }, [])
+
   const sessionUserId = session?.user?.id
   const fetchSecurityLog = useCallback(async () => {
     const userId = Number(sessionUserId)
@@ -186,6 +198,7 @@ export default function AdminPage() {
       if (activeSection === "dashboard") await fetchSales(selectedDate)
       else if (activeSection === "shifts") setShiftsKey(k => k + 1)
       else if (activeSection === "sales") setSalesKey(k => k + 1)
+      else if (activeSection === "trash") await fetchTrash(selectedDate)
       else if (activeSection === "staff") await fetchStaff()
       else if (activeSection === "activity") await fetchAuditLog()
       else if (activeSection === "security") await fetchSecurityLog()
@@ -438,6 +451,8 @@ export default function AdminPage() {
             <ShiftsSection key={`${selectedDate}-${shiftsKey}`} selectedDate={selectedDate} />
           ) : activeSection === "sales" ? (
             <SalesSection key={`sales-${salesKey}`} />
+          ) : activeSection === "trash" ? (
+            <TrashSection orders={trashOrders} onRefresh={() => fetchTrash(selectedDate)} />
           ) : activeSection === "activity" ? (
             <AuditLogSection entries={auditLog} />
           ) : activeSection === "security" ? (
@@ -819,6 +834,128 @@ function DashboardSection({ data, selectedDate, onRefresh }: { data: SalesData |
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function TrashSection({ orders, onRefresh }: { orders: TrashOrder[]; onRefresh: () => Promise<void> }) {
+  const [actionBusy, setActionBusy] = useState<string | null>(null)
+  const [fetchError, setFetchError] = useState(false)
+
+  const handleRestore = async (order: TrashOrder) => {
+    if (!confirm(`Restore order ${order.order_number} from Trash?`)) return
+    setActionBusy(order.id)
+    try {
+      const res = await fetch(`/api/sales/${order.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isDeleted: false }),
+      })
+      if (!res.ok) throw new Error()
+      await onRefresh()
+      toast.success(`Order ${order.order_number} restored.`)
+    } catch {
+      setFetchError(true)
+      toast.error("Could not restore order. Please try again.")
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  const handlePermanentDelete = async (order: TrashOrder) => {
+    if (!confirm(`Permanently delete order ${order.order_number}? This cannot be undone.`)) return
+    setActionBusy(order.id)
+    try {
+      const res = await fetch(`/api/sales/${order.id}?force=true`, { method: "DELETE" })
+      if (!res.ok) throw new Error()
+      await onRefresh()
+      toast.success(`Order ${order.order_number} permanently deleted.`)
+    } catch {
+      setFetchError(true)
+      toast.error("Could not permanently delete order. Please try again.")
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  if (orders.length === 0 && fetchError) {
+    return (
+      <div className="flex items-center justify-center py-32">
+        <div className="text-center max-w-sm">
+          <AlertTriangle className="h-10 w-10 text-amber-500 mx-auto mb-3" />
+          <h3 className="font-semibold text-base mb-1">Unable to load trash</h3>
+          <p className="text-sm text-muted-foreground mb-4">
+            The server could not be reached. Please refresh or try again later.
+          </p>
+          <Button variant="outline" size="sm" onClick={() => { setFetchError(false); onRefresh().catch(() => setFetchError(true)) }}>
+            <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="bg-white rounded-xl border p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="font-semibold">Trash</h2>
+            <p className="text-xs text-muted-foreground mt-1">Deleted orders are kept here until permanently removed.</p>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => onRefresh().catch(() => setFetchError(true))}>
+            <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+          </Button>
+        </div>
+      </div>
+
+      {orders.length === 0 ? (
+        <EmptyState icon={Trash2} message="No deleted orders in the trash." />
+      ) : (
+        <div className="bg-white rounded-xl border shadow-sm divide-y">
+          {orders.map((order) => {
+            const isBusy = actionBusy === order.id
+            return (
+              <div key={order.id} className="px-5 py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <span className="font-mono text-sm font-semibold">{order.order_number}</span>
+                    <span className="text-[10px] uppercase tracking-wide text-white bg-red-600 rounded-full px-2 py-1">Deleted</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{fmtTime(order.created_at)} · {order.created_by || order.server_name}</p>
+                  <p className="text-xs text-gray-500 mt-1 truncate max-w-lg">
+                    {order.items?.map((it, i) => `${it.quantity}× ${it.name}`).join(", ")}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Deleted by {order.deleted_by ?? "admin"} · {order.deleted_at ? new Date(order.deleted_at).toLocaleString("en-PH") : "unknown"}
+                  </p>
+                </div>
+                <div className="flex gap-2 flex-wrap justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 gap-1"
+                    onClick={() => handleRestore(order)}
+                    disabled={isBusy}
+                  >
+                    {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArchiveRestore className="h-3 w-3" />}
+                    Restore
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-9 gap-1"
+                    onClick={() => handlePermanentDelete(order)}
+                    disabled={isBusy}
+                  >
+                    <Trash2 className="h-3 w-3" /> Permanently Delete
+                  </Button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -1318,7 +1455,9 @@ const ACTION_META: Record<string, { label: string; icon: React.ElementType; colo
   order_placed:         { label: "Order Placed",            icon: ShoppingCart,  color: "text-green-700 bg-green-50"   },
   order_voided:         { label: "Order Voided",            icon: Ban,           color: "text-red-600 bg-red-50"       },
   order_restored:       { label: "Order Restored",          icon: ArchiveRestore,color: "text-emerald-600 bg-emerald-50"},
+  order_restored_from_trash: { label: "Order Restored",       icon: ArchiveRestore,color: "text-emerald-600 bg-emerald-50"},
   order_deleted:        { label: "Order Deleted",           icon: Trash2,        color: "text-red-700 bg-red-100"      },
+  order_permanently_deleted: { label: "Order Permanently Deleted", icon: Trash2, color: "text-red-700 bg-red-100"},
   // Shifts
   shift_started:        { label: "Shift Started",           icon: Clock,         color: "text-blue-600 bg-blue-50"     },
   shift_closed:         { label: "Shift Closed",            icon: CheckCircle,   color: "text-gray-600 bg-gray-100"    },
@@ -1348,7 +1487,7 @@ type ActivityCategory = typeof CATEGORY_FILTERS[number]["key"]
 const ACTION_CATEGORY: Record<string, ActivityCategory> = {
   login: "account", create_account: "account", update_account: "account",
   reset_password: "account", delete_account: "account", change_own_password: "account",
-  order_placed: "order", order_voided: "order", order_restored: "order", order_deleted: "order",
+  order_placed: "order", order_voided: "order", order_restored: "order", order_restored_from_trash: "order", order_deleted: "order", order_permanently_deleted: "order",
   shift_started: "shift", shift_closed: "shift",
   shift_updated: "shift", shift_deleted: "shift",
   product_added: "menu", product_updated: "menu", product_deleted: "menu", product_availability: "menu",
