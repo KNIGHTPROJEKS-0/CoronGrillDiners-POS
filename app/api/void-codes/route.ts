@@ -65,11 +65,22 @@ export async function PUT() {
     try {
       await client.query(`CREATE INDEX IF NOT EXISTS idx_void_codes_used_at ON void_codes(used_at)`)
     } catch { /* index might already exist */ }
+    try {
+      await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_void_codes_code_unique ON void_codes(code)`)
+    } catch { /* duplicate codes could prevent a unique index; keep going */ }
+
+    const actor = {
+      id: session.user.id ?? session.user.email ?? session.user.name ?? "unknown",
+      username: (session.user as any).username ?? session.user.name ?? session.user.email ?? "unknown",
+    }
 
     const inserted: string[] = []
     for (const code of batch) {
       const r = await client.query(
-        `INSERT INTO void_codes (code) VALUES ($1) ON CONFLICT (code) DO NOTHING RETURNING code`,
+        `INSERT INTO void_codes (code)
+         SELECT $1
+         WHERE NOT EXISTS (SELECT 1 FROM void_codes WHERE code = $1)
+         RETURNING code`,
         [code]
       )
       if (r.rows[0]) inserted.push(r.rows[0].code)
@@ -77,10 +88,9 @@ export async function PUT() {
     
     await client.query("COMMIT")
     try {
-      const username = (session.user as any).username ?? session.user.name
       logEvent(
         "void_codes_generated",
-        { id: session.user.id!, username },
+        actor,
         `Generated ${inserted.length} void codes: ${inserted.join(", ")}`
       )
     } catch (e) {
@@ -117,7 +127,10 @@ export async function POST(request: Request) {
   }
 
   const normalizedCode = code.trim().toUpperCase()
-  const username = (session.user as any).username ?? session.user.name
+  const actor = {
+    id: session.user.id ?? session.user.email ?? session.user.name ?? "unknown",
+    username: (session.user as any).username ?? session.user.name ?? session.user.email ?? "unknown",
+  }
 
   const client = await pool.connect()
   try {
@@ -151,7 +164,7 @@ export async function POST(request: Request) {
            AND (created_by = $3 OR server_name = $3)
            AND status = 'completed'
          RETURNING id, order_number`,
-        [reason || "Voided with admin code", saleId, username]
+        [reason || "Voided with admin code", saleId, actor.username]
       )
     }
 
@@ -208,16 +221,15 @@ export async function POST(request: Request) {
 
     await client.query(
       `UPDATE void_codes SET used_by = $1, used_at = NOW(), sale_id = $2 WHERE code = $3`,
-      [username, saleId, normalizedCode]
+      [actor.username, saleId, normalizedCode]
     )
 
     await client.query("COMMIT")
 
     try {
-      const username = (session.user as any).username ?? session.user.name
       logEvent(
         "order_voided",
-        { id: session.user.id!, username },
+        actor,
         `Order ${saleResult.rows[0].order_number} voided using code ${normalizedCode}`
       )
     } catch (e) {
