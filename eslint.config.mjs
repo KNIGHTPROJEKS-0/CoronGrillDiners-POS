@@ -4,11 +4,18 @@ import nextConfig from "eslint-config-next"
 /**
  * ESLint flat config for Coron Grill Diners POS.
  *
- * Extends the official Next.js recommended ruleset (which already bundles
- * @typescript-eslint, eslint-plugin-react, eslint-plugin-react-hooks, and
- * eslint-plugin-next).  Additional project-specific overrides are layered on
- * top so we get real, actionable feedback without noise.
+ * eslint-config-next exports a 3-element flat config array. The second
+ * element (index 1) registers @typescript-eslint as a plugin. We pull that
+ * reference out and re-declare it in our override block so the plugin is
+ * explicitly available to our custom rules regardless of which ESLint runner
+ * (local CLI vs. Vercel's `next build` lint pass) resolves the config.
  */
+
+// Extract the @typescript-eslint plugin that eslint-config-next already bundles.
+// This avoids adding a direct devDependency on @typescript-eslint/eslint-plugin
+// while still making the plugin object available to our rules block.
+const tsPlugin = nextConfig.find((c) => c.plugins?.["@typescript-eslint"])
+  ?.plugins?.["@typescript-eslint"]
 
 /** @type {import("eslint").Linter.Config[]} */
 const config = [
@@ -29,6 +36,14 @@ const config = [
 
   // ── Project-specific overrides ────────────────────────────────────────────
   {
+    // Explicitly register the plugin so our @typescript-eslint/* rules below
+    // are resolvable in all ESLint execution contexts (local CLI, next build,
+    // Vercel CI). Without this, flat config runners that don't inherit the
+    // plugin from the parent array entry will throw:
+    //   "Could not find plugin '@typescript-eslint' in configuration"
+    plugins: {
+      ...(tsPlugin ? { "@typescript-eslint": tsPlugin } : {}),
+    },
     rules: {
       // ── TypeScript ──────────────────────────────────────────────────────
       // Warn on `any` instead of error — raw SQL query rows legitimately
