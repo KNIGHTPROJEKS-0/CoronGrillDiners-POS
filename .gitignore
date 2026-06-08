@@ -26,6 +26,7 @@ scripts/final-migrate.js
 scripts/seed-final-staff.js
 scripts/force-rescue.js
 scripts/seed-menu.js
+scripts/emergency-rescue.js
 
 # Vercel
 .vercel
