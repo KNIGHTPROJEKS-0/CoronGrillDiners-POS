@@ -130,6 +130,8 @@ export default function AdminPage() {
   const [activeSection, setActiveSection] = useState<Section>("dashboard")
   const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString("en-CA"))
   const [salesData, setSalesData] = useState<SalesData | null>(null)
+  const [availableShifts, setAvailableShifts] = useState<ShiftRecord[]>([])
+  const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null)
   const [trashOrders, setTrashOrders] = useState<TrashOrder[]>([])
   const [staff, setStaff] = useState<StaffUser[]>([])
   const [auditLog, setAuditLog] = useState<AuditEntry[]>([])
@@ -148,10 +150,24 @@ export default function AdminPage() {
 
   // ── Data fetchers ──────────────────────────────────────────────────────────
 
-  const fetchSales = useCallback(async (date: string) => {
-    const res = await fetch(`/api/sales?date=${date}`)
+  const fetchSales = useCallback(async (date: string, shiftId?: string | null) => {
+    const params = new URLSearchParams()
+    params.set("date", date)
+    if (shiftId) params.set("shiftId", shiftId)
+    const res = await fetch(`/api/sales?${params.toString()}`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     setSalesData(await res.json())
+  }, [])
+
+  const fetchShiftsForDate = useCallback(async (date: string) => {
+    try {
+      const res = await fetch(`/api/sales/shifts?from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const j = await res.json()
+      setAvailableShifts(j.shifts ?? [])
+    } catch (e) {
+      setAvailableShifts([])
+    }
   }, [])
 
   const fetchStaff = useCallback(async () => {
@@ -212,7 +228,10 @@ export default function AdminPage() {
   }, [activeSection, selectedDate, fetchSales, fetchStaff, fetchAuditLog, fetchSecurityLog, fetchVoidCodes])
 
   useEffect(() => {
-    if (status === "authenticated" && isAdmin && activeSection !== "menu" && activeSection !== "sales") refreshCurrent()
+    if (status === "authenticated" && isAdmin && activeSection !== "menu" && activeSection !== "sales") {
+      refreshCurrent()
+      if (activeSection === "dashboard") fetchShiftsForDate(selectedDate)
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection, selectedDate, status, isAdmin])
 
@@ -414,6 +433,25 @@ export default function AdminPage() {
                 onChange={(e) => setSelectedDate(e.target.value)}
                 className="border rounded-md px-3 py-1.5 text-sm bg-white"
               />
+            )}
+            {/* Shift selector for dashboard: lets admin pick a specific shift to report on */}
+            {activeSection === "dashboard" && (
+              <Select
+                onValueChange={(v) => { setSelectedShiftId(v || null); fetchSales(selectedDate, v || null) }}
+                value={selectedShiftId ?? ""}
+              >
+                <SelectTrigger className="w-56 h-8 text-sm">
+                  <SelectValue placeholder="Select shift (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">All day</SelectItem>
+                  {availableShifts.map(s => (
+                    <SelectItem key={s.id} value={String(s.id)}>
+                      {`${new Date(s.start_time).toLocaleTimeString("en-PH", { hour: '2-digit', minute: '2-digit' })} - ${s.end_time ? new Date(s.end_time).toLocaleTimeString("en-PH", { hour: '2-digit', minute: '2-digit' }) : 'now'} · ${s.cashier_name}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             )}
             {showRefresh && (
               <Button variant="outline" size="icon" onClick={() => refreshCurrent(true)} disabled={isLoading}>
