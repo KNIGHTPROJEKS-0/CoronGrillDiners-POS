@@ -1322,11 +1322,14 @@ const ACTION_META: Record<string, { label: string; icon: React.ElementType; colo
   // Shifts
   shift_started:        { label: "Shift Started",           icon: Clock,         color: "text-blue-600 bg-blue-50"     },
   shift_closed:         { label: "Shift Closed",            icon: CheckCircle,   color: "text-gray-600 bg-gray-100"    },
+  shift_updated:        { label: "Shift Updated",           icon: Pencil,        color: "text-blue-600 bg-blue-50"     },
+  shift_deleted:        { label: "Shift Deleted",           icon: Trash2,        color: "text-red-600 bg-red-50"       },
   // Menu — products
   product_added:        { label: "Product Added",           icon: Package,       color: "text-green-600 bg-green-50"   },
   product_updated:      { label: "Product Updated",         icon: Pencil,        color: "text-blue-600 bg-blue-50"     },
   product_deleted:      { label: "Product Deleted",         icon: Trash2,        color: "text-red-600 bg-red-50"       },
   product_availability: { label: "Availability Changed",    icon: Eye,           color: "text-amber-600 bg-amber-50"   },
+  void_codes_generated: { label: "Void Codes Generated",    icon: KeySquare,     color: "text-purple-600 bg-purple-50" },
   // Menu — categories
   category_added:       { label: "Category Added",          icon: Tag,           color: "text-green-600 bg-green-50"   },
   category_updated:     { label: "Category Updated",        icon: Pencil,        color: "text-blue-600 bg-blue-50"     },
@@ -1347,8 +1350,10 @@ const ACTION_CATEGORY: Record<string, ActivityCategory> = {
   reset_password: "account", delete_account: "account", change_own_password: "account",
   order_placed: "order", order_voided: "order", order_restored: "order", order_deleted: "order",
   shift_started: "shift", shift_closed: "shift",
+  shift_updated: "shift", shift_deleted: "shift",
   product_added: "menu", product_updated: "menu", product_deleted: "menu", product_availability: "menu",
   category_added: "menu", category_updated: "menu", category_deleted: "menu",
+  void_codes_generated: "order",
 }
 
 function AuditLogSection({ entries }: { entries: AuditEntry[] }) {

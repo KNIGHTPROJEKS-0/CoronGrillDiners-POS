@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import pool from "@/lib/db"
+import { logEvent } from "@/lib/audit"
 
 /* GET — admin only: list all void codes with used/available status */
 export async function GET() {
@@ -75,6 +76,17 @@ export async function PUT() {
     }
     
     await client.query("COMMIT")
+    try {
+      const username = (session.user as any).username ?? session.user.name
+      logEvent(
+        "void_codes_generated",
+        { id: session.user.id!, username },
+        `Generated ${inserted.length} void codes: ${inserted.join(", ")}`
+      )
+    } catch (e) {
+      // best-effort
+    }
+
     return NextResponse.json({ success: true, generated: inserted })
   } catch (error) {
     await client.query("ROLLBACK")
@@ -176,6 +188,17 @@ export async function POST(request: Request) {
     )
 
     await client.query("COMMIT")
+
+    try {
+      const username = (session.user as any).username ?? session.user.name
+      logEvent(
+        "order_voided",
+        { id: session.user.id!, username },
+        `Order ${saleResult.rows[0].order_number} voided using code ${normalizedCode}`
+      )
+    } catch (e) {
+      // ignore
+    }
 
     return NextResponse.json({
       success: true,

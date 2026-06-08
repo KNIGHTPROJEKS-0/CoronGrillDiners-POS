@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import pool from "@/lib/db"
+import { logEvent } from "@/lib/audit"
 
 export async function PATCH(
   request: Request,
@@ -59,6 +60,20 @@ export async function PATCH(
       return NextResponse.json({ error: "Shift not found" }, { status: 404 })
     }
 
+    // Log admin update to this shift (best-effort)
+    try {
+      const username = (session.user as any).username ?? session.user.name
+      const actor = { id: session.user.id!, username }
+      const updatedFields = Object.keys(body).join(", ") || "(unknown)"
+      logEvent(
+        "shift_updated",
+        actor,
+        `Updated shift ${id}: ${updatedFields}`
+      )
+    } catch (e) {
+      // ignore logging failures
+    }
+
     return NextResponse.json({ shift: result.rows[0] })
   } catch (error) {
     console.error("Failed to update shift:", error)
@@ -102,6 +117,18 @@ export async function DELETE(
 
     await client.query(`DELETE FROM public.shifts WHERE id = $1`, [id])
     await client.query("COMMIT")
+
+    // Log deletion of shift
+    try {
+      const username = (session.user as any).username ?? session.user.name
+      logEvent(
+        "shift_deleted",
+        { id: session.user.id!, username },
+        `Deleted shift for ${cashier_username} (${start_time} → ${end_time ?? 'ongoing'}) and removed ${salesRes.rowCount} sales`
+      )
+    } catch (e) {
+      // ignore logging failures
+    }
 
     return NextResponse.json({ success: true, deletedSales: salesRes.rowCount })
   } catch (error) {

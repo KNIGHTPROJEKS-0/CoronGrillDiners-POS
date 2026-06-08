@@ -49,6 +49,17 @@ export async function GET() {
          WHERE id = $4`,
         [cash_sales, total_sales, expectedCash, stale.id]
       )
+      // Log auto-closure so admins can see shifts closed by the system
+      try {
+        const username = (session.user as any).username ?? session.user.name
+        logEvent(
+          "shift_closed",
+          { id: session.user.id!, username },
+          `Auto-closed shift for ${stale.cashier_username} (start: ${stale.start_time}). Calculated expected cash: ₱${expectedCash.toFixed(2)}`
+        )
+      } catch (e) {
+        // best-effort logging only
+      }
     }
 
     // ── Step 2: Return today's open shift with LIVE sales totals ──
