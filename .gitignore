@@ -30,6 +30,7 @@ scripts/seed-menu.js
 scripts/emergency-rescue.js
 scripts/http-rescue.js
 scripts/complete-final-migration.js
+scripts/import-local-json.js
 
 # Vercel
 .vercel
