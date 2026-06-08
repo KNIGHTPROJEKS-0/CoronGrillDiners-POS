@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   try {
     // ── Step 1: Fetch current active shift for the cashier ──
     const shiftResult = await pool.query(
-      `SELECT id, start_time
+      `SELECT id, start_time, end_time
        FROM public.shifts
        WHERE cashier_id = $1::integer
          AND status = 'open'
@@ -44,7 +44,9 @@ export async function GET(request: Request) {
     
     console.log("[SALES/MY] Active shift found:", { shiftId: currentShift.id, startTime: currentShift.start_time })
     
-    // ── Step 3: Filter orders by current shift (created_at >= shift.start_time) ──
+    // ── Step 3: Filter orders by current shift (created_at between shift start and end) ──
+    const shiftStart = currentShift.start_time
+    const shiftEnd = currentShift.end_time ?? null
     const statsResult = await pool.query(
       `SELECT
          COALESCE(status, 'completed') AS status,
@@ -52,11 +54,12 @@ export async function GET(request: Request) {
          COALESCE(SUM(grand_total), 0)::float AS total
        FROM public.sales
        WHERE created_by = $1
-         AND created_at >= $2
-         AND DATE(created_at AT TIME ZONE 'Asia/Manila') = $3::date
+        AND created_at >= $2
+        AND ($3::timestamptz IS NULL OR created_at <= $3)
+         AND COALESCE(is_deleted, false) = false
        GROUP BY COALESCE(status, 'completed')
        ORDER BY COALESCE(status, 'completed')`,
-      [username, currentShift.start_time, date]
+      [username, shiftStart, shiftEnd]
     )
 
     const ordersResult = await pool.query(
@@ -70,10 +73,11 @@ export async function GET(request: Request) {
          status, void_reason, created_at
        FROM public.sales
        WHERE created_by = $1
-         AND created_at >= $2
-         AND DATE(created_at AT TIME ZONE 'Asia/Manila') = $3::date
+        AND created_at >= $2
+        AND ($3::timestamptz IS NULL OR created_at <= $3)
+         AND COALESCE(is_deleted, false) = false
        ORDER BY created_at DESC`,
-      [username, currentShift.start_time, date]
+      [username, shiftStart, shiftEnd]
     )
     console.log("[SALES/MY] Query results:", { statsCount: statsResult.rows.length, ordersCount: ordersResult.rows.length, orders: ordersResult.rows.map(o => ({ id: o.id, order_number: o.order_number, created_by: o.created_by, server_name: o.server_name })) })
 

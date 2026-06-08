@@ -158,7 +158,7 @@ export default function CashierSummaryDialog({ open, onOpenChange, cashierName }
         setVoidPanel(null)
         setVoidCode(prev => { const n = { ...prev }; delete n[orderId]; return n })
         setVoidReason(prev => { const n = { ...prev }; delete n[orderId]; return n })
-        fetchData()
+        await fetchData()
         refreshProducts().catch(() => {})
       }
     } catch {
@@ -186,7 +186,7 @@ export default function CashierSummaryDialog({ open, onOpenChange, cashierName }
       } else {
         setCancelPanel(null)
         setCancelReason("")
-        fetchData()
+        await fetchData()
         refreshProducts().catch(() => {})
       }
     } catch {

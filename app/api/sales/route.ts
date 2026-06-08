@@ -170,47 +170,113 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const date = searchParams.get("date") || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
-    console.log("[SALES/GET] Admin fetching sales for date:", date)
+    const shiftId = searchParams.get("shiftId")
+    let shiftWindow: { start: string; end: string | null } | null = null
+    if (shiftId) {
+      const shiftRes = await pool.query(`SELECT start_time, end_time FROM public.shifts WHERE id = $1`, [shiftId])
+      if (shiftRes.rows.length > 0) {
+        shiftWindow = { start: shiftRes.rows[0].start_time, end: shiftRes.rows[0].end_time ?? null }
+      }
+    }
+    const deleted = searchParams.get("deleted") === "true"
+    const deletedFilter = deleted ? "AND COALESCE(is_deleted, false) = true" : "AND COALESCE(is_deleted, false) = false"
+    console.log("[SALES/GET] Admin fetching sales for date:", date, { deleted, shiftId })
 
-    const [dailyStats, paymentBreakdown, recentOrders] = await Promise.all([
-      pool.query(
-        `SELECT
-           COUNT(*)::int AS total_orders,
-           COUNT(*) FILTER (WHERE COALESCE(status, 'completed') = 'completed')::int AS completed_orders,
-           COALESCE(SUM(grand_total) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_sales,
-           COALESCE(SUM(subtotal) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_subtotal,
-           COALESCE(SUM(service_charge) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_service_charge
-         FROM public.sales
-         WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1`,
-        [date]
-      ),
-      pool.query(
-        `SELECT
-           payment_method,
-           COUNT(*)::int AS count,
-           COALESCE(SUM(grand_total), 0)::float AS total
-         FROM public.sales
-         WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1
-           AND COALESCE(status, 'completed') = 'completed'
-         GROUP BY payment_method
-         ORDER BY total DESC`,
-        [date]
-      ),
-      pool.query(
-        `SELECT
-           id, order_number, items,
-           subtotal::float, service_charge::float, grand_total::float,
-           COALESCE(discount_percent, 0)::int AS discount_percent,
-           payment_method, server_name, created_by,
-           COALESCE(status, 'completed') AS status,
-           void_reason, created_at
-         FROM public.sales
-         WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1
-         ORDER BY created_at DESC
-         LIMIT 50`,
-        [date]
-      ),
-    ])
+    let dailyStats, paymentBreakdown, recentOrders
+    if (shiftWindow) {
+      const { start, end } = shiftWindow
+      const endParam = end ?? null
+      ;[dailyStats, paymentBreakdown, recentOrders] = await Promise.all([
+        pool.query(
+          `SELECT
+             COUNT(*)::int AS total_orders,
+             COUNT(*) FILTER (WHERE COALESCE(status, 'completed') = 'completed')::int AS completed_orders,
+             COALESCE(SUM(grand_total) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_sales,
+             COALESCE(SUM(subtotal) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_subtotal,
+             COALESCE(SUM(service_charge) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_service_charge
+           FROM public.sales
+           WHERE created_at >= $1
+             AND ($2::timestamptz IS NULL OR created_at <= $2)
+             ${deletedFilter}`,
+          [start, endParam]
+        ),
+        pool.query(
+          `SELECT
+             payment_method,
+             COUNT(*)::int AS count,
+             COALESCE(SUM(grand_total), 0)::float AS total
+           FROM public.sales
+           WHERE created_at >= $1
+             AND ($2::timestamptz IS NULL OR created_at <= $2)
+             AND COALESCE(status, 'completed') = 'completed'
+             ${deletedFilter}
+           GROUP BY payment_method
+           ORDER BY total DESC`,
+          [start, endParam]
+        ),
+        pool.query(
+          `SELECT
+             id, order_number, items,
+             subtotal::float, service_charge::float, grand_total::float,
+             COALESCE(discount_percent, 0)::int AS discount_percent,
+             payment_method, server_name, created_by,
+             COALESCE(status, 'completed') AS status,
+             void_reason, created_at,
+             deleted_at, deleted_by
+           FROM public.sales
+           WHERE created_at >= $1
+             AND ($2::timestamptz IS NULL OR created_at <= $2)
+             ${deletedFilter}
+           ORDER BY created_at DESC
+           LIMIT 50`,
+          [start, endParam]
+        ),
+      ])
+    } else {
+      ;[dailyStats, paymentBreakdown, recentOrders] = await Promise.all([
+        pool.query(
+          `SELECT
+             COUNT(*)::int AS total_orders,
+             COUNT(*) FILTER (WHERE COALESCE(status, 'completed') = 'completed')::int AS completed_orders,
+             COALESCE(SUM(grand_total) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_sales,
+             COALESCE(SUM(subtotal) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_subtotal,
+             COALESCE(SUM(service_charge) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_service_charge
+           FROM public.sales
+           WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1
+             ${deletedFilter}`,
+          [date]
+        ),
+        pool.query(
+          `SELECT
+             payment_method,
+             COUNT(*)::int AS count,
+             COALESCE(SUM(grand_total), 0)::float AS total
+           FROM public.sales
+           WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1
+             AND COALESCE(status, 'completed') = 'completed'
+             ${deletedFilter}
+           GROUP BY payment_method
+           ORDER BY total DESC`,
+          [date]
+        ),
+        pool.query(
+          `SELECT
+             id, order_number, items,
+             subtotal::float, service_charge::float, grand_total::float,
+             COALESCE(discount_percent, 0)::int AS discount_percent,
+             payment_method, server_name, created_by,
+             COALESCE(status, 'completed') AS status,
+             void_reason, created_at,
+             deleted_at, deleted_by
+           FROM public.sales
+           WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1
+             ${deletedFilter}
+           ORDER BY created_at DESC
+           LIMIT 50`,
+          [date]
+        ),
+      ])
+    }
     console.log("[SALES/GET] Admin query results:", { 
       totalOrders: dailyStats.rows[0]?.total_orders,
       completedOrders: dailyStats.rows[0]?.completed_orders,

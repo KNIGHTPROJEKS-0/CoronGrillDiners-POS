@@ -87,10 +87,14 @@ async function setup() {
     await client.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'completed'`);
     await client.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS void_reason TEXT`);
     await client.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS discount_percent SMALLINT DEFAULT 0`);
+    await client.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE`);
+    await client.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE`);
+    await client.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS deleted_by TEXT`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at DESC)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_sales_status ON sales(status)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_sales_created_by ON sales(created_by)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_sales_is_deleted ON sales(is_deleted)`);
 
     // ── SHIFTS ────────────────────────────────────────────────────────────────
     console.log("Creating shifts table...");

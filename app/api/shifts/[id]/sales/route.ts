@@ -40,6 +40,7 @@ export async function GET(
        WHERE (created_by = $1 OR created_by = $2 OR server_name = $1 OR server_name = $2)
          AND created_at >= $3
          AND created_at <= $4
+         AND COALESCE(is_deleted, false) = false
        ORDER BY created_at ASC`,
       [shift.cashier_name, shift.cashier_username, shift.start_time, endTime]
     )

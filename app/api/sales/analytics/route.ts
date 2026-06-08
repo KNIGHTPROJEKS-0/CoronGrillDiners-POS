@@ -23,6 +23,7 @@ export async function GET(request: Request) {
          WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') >= ($1::date - INTERVAL '6 days')
            AND DATE(created_at AT TIME ZONE 'Asia/Manila') <= $1::date
            AND COALESCE(status, 'completed') = 'completed'
+           AND COALESCE(is_deleted, false) = false
          GROUP BY DATE(created_at AT TIME ZONE 'Asia/Manila')
          ORDER BY date`,
         [date]
@@ -35,6 +36,7 @@ export async function GET(request: Request) {
          FROM public.sales, jsonb_array_elements(items) AS item
          WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1
            AND COALESCE(status, 'completed') = 'completed'
+           AND COALESCE(is_deleted, false) = false
          GROUP BY item->>'name'
          ORDER BY total_qty DESC
          LIMIT 8`,

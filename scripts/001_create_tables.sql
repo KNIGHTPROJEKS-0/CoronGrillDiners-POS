@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS sales (
   change_amount DECIMAL(10, 2) DEFAULT 0,
   payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'gcash', 'card')),
   server_name TEXT,
+  is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+  deleted_at TIMESTAMP WITH TIME ZONE,
+  deleted_by TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -141,6 +144,7 @@ CREATE TRIGGER on_auth_user_created
 -- Create index for faster queries
 CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method);
+CREATE INDEX IF NOT EXISTS idx_sales_is_deleted ON sales(is_deleted);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 
 -- Enable realtime for products table

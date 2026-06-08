@@ -23,6 +23,19 @@ export async function PATCH(
       if (!isAdmin) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
       }
+      const saleMeta = await pool.query(
+        `SELECT status, payment_method, grand_total, shift_id
+         FROM public.sales
+         WHERE id = $1`,
+        [id]
+      )
+      if (saleMeta.rows.length === 0) {
+        return NextResponse.json({ error: "Sale not found" }, { status: 404 })
+      }
+      const prevStatus = saleMeta.rows[0].status ?? "completed"
+      const paymentMethod = saleMeta.rows[0].payment_method
+      const grandTotal = Number(saleMeta.rows[0].grand_total || 0)
+      const shiftId = saleMeta.rows[0].shift_id
       const result = await pool.query(
         `UPDATE public.sales
          SET is_deleted = $1,
@@ -34,6 +47,21 @@ export async function PATCH(
       )
       if (result.rows.length === 0) {
         return NextResponse.json({ error: "Sale not found" }, { status: 404 })
+      }
+      if (shiftId && prevStatus === "completed") {
+        const totalDelta = isDeleted ? -grandTotal : grandTotal
+        const cashDelta = paymentMethod === "cash" ? totalDelta : 0
+        await pool.query(
+          `UPDATE public.shifts
+           SET total_sales = COALESCE(total_sales, 0) + $1,
+               total_cash_sales = COALESCE(total_cash_sales, 0) + $2,
+               expected_cash = CASE
+                 WHEN $2 <> 0 THEN COALESCE(expected_cash, 0) + $2
+                 ELSE expected_cash
+               END
+           WHERE id = $3`,
+          [totalDelta, cashDelta, shiftId]
+        )
       }
       const sale = result.rows[0]
       if (isDeleted) {
@@ -76,7 +104,8 @@ export async function PATCH(
 
       /* Fetch current status + items before updating (needed for stock logic) */
       const saleCheck = await client.query(
-        `SELECT status, items FROM public.sales WHERE id = $1`,
+        `SELECT status, items, payment_method, grand_total, shift_id
+         FROM public.sales WHERE id = $1 FOR UPDATE`,
         [id]
       )
       if (saleCheck.rows.length === 0) {
@@ -85,6 +114,9 @@ export async function PATCH(
       }
       const prevStatus = saleCheck.rows[0].status
       const saleItems: Array<{ id?: number; quantity: number }> = saleCheck.rows[0].items ?? []
+      const salePaymentMethod = saleCheck.rows[0].payment_method
+      const saleTotal = Number(saleCheck.rows[0].grand_total || 0)
+      const saleShiftId = saleCheck.rows[0].shift_id
 
       /* Update the sale record */
       let result
@@ -140,6 +172,26 @@ export async function PATCH(
               [Number(item.quantity), item.id]
             )
           }
+        }
+      }
+      if (saleShiftId) {
+        const wasCompleted = prevStatus === "completed"
+        const isNowCompleted = status === "completed"
+        const totalDelta = (isNowCompleted ? saleTotal : 0) - (wasCompleted ? saleTotal : 0)
+        const cashDelta = salePaymentMethod === "cash" ? totalDelta : 0
+
+        if (totalDelta !== 0 || cashDelta !== 0) {
+          await client.query(
+            `UPDATE public.shifts
+             SET total_sales = COALESCE(total_sales, 0) + $1,
+                 total_cash_sales = COALESCE(total_cash_sales, 0) + $2,
+                 expected_cash = CASE
+                   WHEN $2 <> 0 THEN COALESCE(expected_cash, 0) + $2
+                   ELSE expected_cash
+                 END
+             WHERE id = $3`,
+            [totalDelta, cashDelta, saleShiftId]
+          )
         }
       }
       /* cancelled → no stock change (food was prepared/wasted, cost still applies) */

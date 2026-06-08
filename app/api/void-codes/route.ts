@@ -182,6 +182,30 @@ export async function POST(request: Request) {
       }
     }
 
+      const shiftMeta = await client.query(
+        `SELECT shift_id, payment_method, grand_total
+         FROM public.sales
+         WHERE id = $1`,
+        [saleId]
+      )
+      const shiftId = shiftMeta.rows[0]?.shift_id
+      const paymentMethod = shiftMeta.rows[0]?.payment_method
+      const grandTotal = Number(shiftMeta.rows[0]?.grand_total || 0)
+      if (shiftId) {
+        const cashDelta = paymentMethod === "cash" ? -grandTotal : 0
+        await client.query(
+          `UPDATE public.shifts
+           SET total_sales = COALESCE(total_sales, 0) - $1,
+               total_cash_sales = COALESCE(total_cash_sales, 0) - $2,
+               expected_cash = CASE
+                 WHEN $2 <> 0 THEN COALESCE(expected_cash, 0) - $2
+                 ELSE expected_cash
+               END
+           WHERE id = $3`,
+          [grandTotal, cashDelta, shiftId]
+        )
+      }
+
     await client.query(
       `UPDATE void_codes SET used_by = $1, used_at = NOW(), sale_id = $2 WHERE code = $3`,
       [username, saleId, normalizedCode]

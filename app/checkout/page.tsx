@@ -265,7 +265,13 @@ export default function CheckoutPage() {
     change,
   }
 
-  const recordSale = async () => {
+  type RecordSaleResult = {
+    savedToDb: boolean
+    alreadySaved?: boolean
+    offlineSaved?: boolean
+  }
+
+  const recordSale = async (): Promise<RecordSaleResult> => {
     try {
       console.log("[CHECKOUT] Starting recordSale:", {
         orderNumber,
@@ -322,12 +328,13 @@ export default function CheckoutPage() {
         toast.info(`Order ${orderNumber} confirmed`, {
           description: "This order was already saved to the database.",
         })
-        return
+        return { savedToDb: true, alreadySaved: true }
       }
       /* Refresh products so cashier sees updated stock counts immediately */
       try { await refreshProducts() } catch {}
       console.log("[CHECKOUT] Order saved successfully:", orderNumber)
       // No toast notification for cashier - go straight to receipt page
+      return { savedToDb: true }
     } catch (err) {
       console.error("[CHECKOUT] recordSale failed:", err)
       if (err instanceof Error && err.message === "STOCK_REJECTED") throw err
@@ -347,6 +354,7 @@ export default function CheckoutPage() {
       toast.warning("Saved offline", {
         description: "No connection. Order will sync when back online.",
       })
+      return { savedToDb: false, offlineSaved: true }
     }
   }
 
@@ -373,7 +381,10 @@ export default function CheckoutPage() {
   const handleSaveOnly = async () => {
     setIsBusy(true)
     try {
-      await recordSale()
+      const result = await recordSale()
+      if (!result.savedToDb && !result.offlineSaved) {
+        return
+      }
       completingRef.current = true
       invalidateSnapshot()
       setShowSummaryModal(false)
@@ -426,7 +437,13 @@ export default function CheckoutPage() {
   const handlePrintAndSave = async () => {
     setIsBusy(true)
     try {
-      await recordSale()
+      const result = await recordSale()
+      if (!result.savedToDb) {
+        if (result.offlineSaved) {
+          toast.error("Order could not be confirmed online. Please retry when online or use Save Only.")
+        }
+        return
+      }
       setShowSummaryModal(false)
       
       // Store receipt data and navigate to receipt page for printing

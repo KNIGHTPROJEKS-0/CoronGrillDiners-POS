@@ -32,7 +32,8 @@ export async function GET() {
          FROM public.sales
          WHERE (created_by = $1 OR created_by = $2)
            AND created_at >= $3
-           AND COALESCE(status, 'completed') = 'completed'`,
+           AND COALESCE(status, 'completed') = 'completed'
+           AND COALESCE(is_deleted, false) = false`,
         [stale.cashier_name, stale.cashier_username, stale.start_time]
       )
       const { cash_sales, total_sales } = salesRes.rows[0]
@@ -82,6 +83,7 @@ export async function GET() {
          WHERE (created_by = s.cashier_name OR created_by = s.cashier_username)
            AND created_at >= s.start_time
            AND COALESCE(status, 'completed') = 'completed'
+           AND COALESCE(is_deleted, false) = false
        ) sal ON true
        WHERE s.cashier_id = $1::integer
          AND s.status = 'open'

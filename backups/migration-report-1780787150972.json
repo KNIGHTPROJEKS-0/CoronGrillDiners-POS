@@ -1,0 +1,39 @@
+{
+  "timestamp": "2026-06-06T23:05:50.974Z",
+  "totalRows": 585,
+  "results": [
+    {
+      "table": "public.users",
+      "rows": 5,
+      "total": 5,
+      "status": "success"
+    },
+    {
+      "table": "public.categories",
+      "rows": 18,
+      "total": 18,
+      "status": "success"
+    },
+    {
+      "table": "public.products",
+      "rows": 108,
+      "total": 108,
+      "status": "success",
+      "skippedColumns": [
+        "stock"
+      ]
+    },
+    {
+      "table": "public.sales",
+      "rows": 434,
+      "total": 434,
+      "status": "success"
+    },
+    {
+      "table": "public.shifts",
+      "rows": 20,
+      "total": 20,
+      "status": "success"
+    }
+  ]
+}
