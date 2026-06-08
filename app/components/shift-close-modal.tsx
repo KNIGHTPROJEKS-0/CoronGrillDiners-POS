@@ -40,10 +40,11 @@ export default function ShiftCloseModal({ open, shift, onClose, onOpenChange }: 
   const [error, setError] = useState("")
   const [countdown, setCountdown] = useState(AUTO_LOGOUT_SECONDS)
   const [isSigningOut, setIsSigningOut] = useState(false)
+  const [isSubmitted, setIsSubmitted] = useState(false)
 
   const amount = parseFloat(actualCash) || 0
   const estimatedExpected = shift.start_balance + (shift.total_cash_sales || 0)
-  const estimatedDiscrepancy = actualCash !== "" ? amount - estimatedExpected : null
+  const estimatedDiscrepancy = isSubmitted && actualCash !== "" ? amount - estimatedExpected : null
 
   // Auto-logout countdown after shift is closed
   useEffect(() => {
@@ -63,13 +64,20 @@ export default function ShiftCloseModal({ open, shift, onClose, onOpenChange }: 
     return () => clearInterval(interval)
   }, [closedShift])
 
-  const handleClose = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleVerifyCount = () => {
     if (isNaN(amount) || amount < 0) {
       setError("Please enter a valid cash amount.")
-      return
+      return false
     }
     setError("")
+    setIsSubmitted(true)
+    return true
+  }
+
+  const handleClose = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!handleVerifyCount()) return
+
     setIsLoading(true)
     const result = await onClose(amount)
     setIsLoading(false)
@@ -337,8 +345,21 @@ export default function ShiftCloseModal({ open, shift, onClose, onOpenChange }: 
 
         <div className="space-y-1.5 text-sm bg-muted/40 rounded-lg p-3 mt-2">
           <div className="flex justify-between"><span className="text-muted-foreground">Starting Cash</span><span className="font-mono">{fmt(shift.start_balance)}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Cash Sales <span className="text-[10px] text-gray-400">(cash payments only)</span></span><span className="font-mono text-green-600">+{fmt(shift.total_cash_sales || 0)}</span></div>
-          <div className="flex justify-between font-semibold border-t pt-1.5"><span>Expected in Drawer</span><span className="font-mono">{fmt(estimatedExpected)}</span></div>
+          {!isSubmitted ? (
+            <p className="text-sm text-muted-foreground mt-2">
+              Enter your counted cash and verify before totals are revealed.
+            </p>
+          ) : (
+            <>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">
+                  Cash Sales <span className="text-[10px] text-gray-400">(cash payments only)</span>
+                </span>
+                <span className="font-mono text-green-600">+{fmt(shift.total_cash_sales || 0)}</span>
+              </div>
+              <div className="flex justify-between font-semibold border-t pt-1.5"><span>Expected in Drawer</span><span className="font-mono">{fmt(estimatedExpected)}</span></div>
+            </>
+          )}
         </div>
 
         <form onSubmit={handleClose} className="space-y-3 mt-1">
@@ -348,7 +369,10 @@ export default function ShiftCloseModal({ open, shift, onClose, onOpenChange }: 
               id="actualCash"
               type="number"
               value={actualCash}
-              onChange={(e) => setActualCash(e.target.value)}
+              onChange={(e) => {
+                setActualCash(e.target.value)
+                setIsSubmitted(false)
+              }}
               placeholder="0.00"
               min="0"
               step="0.01"
@@ -374,7 +398,20 @@ export default function ShiftCloseModal({ open, shift, onClose, onOpenChange }: 
             <Button type="button" variant="outline" className="flex-1" onClick={() => onOpenChange(false)} disabled={isLoading}>
               Cancel
             </Button>
-            <Button type="submit" className="flex-1 bg-orange-600 hover:bg-orange-700" disabled={isLoading}>
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={handleVerifyCount}
+              disabled={isLoading || actualCash === ""}
+            >
+              Verify & Tally Count
+            </Button>
+            <Button
+              type="submit"
+              className="flex-1 bg-orange-600 hover:bg-orange-700"
+              disabled={isLoading || !isSubmitted}
+            >
               {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               {isLoading ? "Closing..." : "Close Shift"}
             </Button>

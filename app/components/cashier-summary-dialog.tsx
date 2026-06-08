@@ -295,7 +295,7 @@ export default function CashierSummaryDialog({ open, onOpenChange, cashierName }
       localStorage.setItem("cgd_active_receipt", JSON.stringify({
         receiptText,
         kitchenText,
-        autoPrintKitchen: false,
+        autoPrintKitchen: !!kitchenText,
         orderNumber: order.order_number,
         printDataJson: JSON.stringify(printData),
         returnPath: "/",

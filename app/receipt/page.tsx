@@ -73,17 +73,17 @@ export default function ReceiptPage() {
     const finalPd = pd
     ;(async () => {
       try {
-        // Prioritize Web Bluetooth/USB for dual printer support (can connect to specific devices by name)
-        // Web Bluetooth supports simultaneous connections to both RPP02N (cashier) and POS58D (kitchen)
         let cashierOk = false
+        let kitchenOk = false
+
         try {
           const cashierResult = await printTo('cashier', buildCustomerReceipt(finalPd))
           cashierOk = cashierResult !== 'none'
-          
-          // Print kitchen ticket if auto-print is enabled
+
           if (cashierOk && entry.autoPrintKitchen && entry.kitchenText) {
             try {
               await printTo('kitchen', buildKitchenTicket(finalPd))
+              kitchenOk = true
               setKitchenDone(true)
             } catch (err) {
               console.error('BLE/USB kitchen print failed:', err)
@@ -92,16 +92,20 @@ export default function ReceiptPage() {
         } catch (err) {
           console.error('BLE/USB cashier print failed:', err)
         }
-        
-        // Fall back to RawBT only if Web Bluetooth/USB not connected
-        // Note: RawBT uses the default printer set in the app, so it can only print to one printer at a time
+
         if (!cashierOk) {
           try {
             const cashierRawbtSuccess = await printToRawBT('cashier', buildCustomerReceipt(finalPd))
             cashierOk = cashierRawbtSuccess
+
             if (cashierOk && entry.autoPrintKitchen && entry.kitchenText) {
-              await printToRawBT('kitchen', buildKitchenTicket(finalPd))
-              setKitchenDone(true)
+              try {
+                await printToRawBT('kitchen', buildKitchenTicket(finalPd))
+                kitchenOk = true
+                setKitchenDone(true)
+              } catch (err) {
+                console.error('RawBT kitchen print failed:', err)
+              }
             }
           } catch (err) {
             console.error('RawBT cashier print failed:', err)
@@ -110,12 +114,10 @@ export default function ReceiptPage() {
             })
           }
         }
-        
+
         if (cashierOk) setCashierDone(true)
 
-        // If everything that was supposed to auto-print succeeded, return to POS
-        // after a brief success flash.
-        if (cashierOk && (!entry.autoPrintKitchen || kitchenDone)) {
+        if (cashierOk && (!entry.autoPrintKitchen || kitchenOk)) {
           setTimeout(() => router.push(entry.returnPath || '/'), 1800)
         }
       } catch (err) {
