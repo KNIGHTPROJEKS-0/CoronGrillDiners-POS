@@ -84,19 +84,26 @@ export async function hasColumn(tableName: string, columnName: string) {
     return columnExistsCache.get(cacheKey)!
   }
 
-  const result = await pool.query(
-    `SELECT 1
-     FROM information_schema.columns
-     WHERE table_schema = 'public'
-       AND table_name = $1
-       AND column_name = $2
-     LIMIT 1`,
-    [tableName, columnName]
-  )
+  try {
+    const result = await pool.query(
+      `SELECT 1
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = $1
+         AND column_name = $2
+       LIMIT 1`,
+      [tableName, columnName]
+    )
 
-  const exists = result.rows.length > 0
-  columnExistsCache.set(cacheKey, exists)
-  return exists
+    const exists = result.rows.length > 0
+    columnExistsCache.set(cacheKey, exists)
+    return exists
+  } catch (error) {
+    console.error(`Error checking column ${tableName}.${columnName}:`, error)
+    // Default to false if check fails
+    columnExistsCache.set(cacheKey, false)
+    return false
+  }
 }
 
 export function makeDeletedFilter(hasIsDeleted: boolean, deleted: boolean, alias = "public.sales") {
