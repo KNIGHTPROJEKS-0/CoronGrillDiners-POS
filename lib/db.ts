@@ -1,3 +1,4 @@
+// Supabase Integration Complete - Fresh build trigger
 import { Pool, type PoolConfig } from "pg"
 
 function buildPoolConfig(): PoolConfig {
