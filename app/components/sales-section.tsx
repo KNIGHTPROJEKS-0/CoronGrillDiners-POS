@@ -725,7 +725,14 @@ export default function SalesSection() {
                             <tr key={s.id} className={`${i % 2 === 0 ? "bg-white" : "bg-gray-50"} hover:bg-blue-50/40`}>
                               <td className="px-3 py-2 text-muted-foreground text-xs text-center">{i + 1}</td>
                               <td className="px-3 py-2 text-xs whitespace-nowrap">{fmtTime(s.created_at)}</td>
-                              <td className="px-3 py-2 font-mono text-xs font-semibold">{s.order_number}</td>
+                              <td className="px-3 py-2 font-mono text-xs font-semibold flex items-center gap-1">
+                                {s.order_number}
+                                {(s.discount_percent ?? 0) > 0 && (
+                                  <Badge className="text-[8px] bg-blue-100 text-blue-700 h-3 px-1 py-0">
+                                    {s.discount_percent}%
+                                  </Badge>
+                                )}
+                              </td>
                               <td className="px-3 py-2 text-xs text-muted-foreground max-w-[200px]">
                                 {itemsSummary(s.items)}
                                 {s.void_reason && (
@@ -735,7 +742,14 @@ export default function SalesSection() {
                               <td className="px-3 py-2 text-xs capitalize">
                                 {paymentIcon(s.payment_method)}{s.payment_method}
                               </td>
-                              <td className="px-3 py-2 text-xs font-semibold text-right">{fmt(s.grand_total)}</td>
+                              <td className="px-3 py-2 text-xs font-semibold text-right">
+                                {fmt(s.grand_total)}
+                                {(s.discount_percent ?? 0) > 0 && (
+                                  <span className="block text-[9px] text-orange-500">
+                                    - {fmt(s.service_charge)}
+                                  </span>
+                                )}
+                              </td>
                               <td className="px-3 py-2 text-center">
                                 <Badge
                                   className={`text-[10px] h-4 px-1.5 border-0 ${
