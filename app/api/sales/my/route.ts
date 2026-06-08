@@ -94,7 +94,7 @@ export async function GET(request: Request) {
          COALESCE(s.change_amount, 0)::float AS change_amount,
          s.payment_method, s.server_name, s.created_by,
          s.status, s.void_reason, s.created_at,
-         $2 AS shift_start_time
+         $2::timestamptz AS shift_start_time
        FROM public.sales s
        WHERE s.created_by = $1
         AND s.created_at >= $2
