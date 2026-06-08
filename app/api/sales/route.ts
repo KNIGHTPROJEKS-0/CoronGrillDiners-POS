@@ -4,6 +4,94 @@ import { authOptions } from "@/lib/auth"
 import pool from "@/lib/db"
 import { logEvent } from "@/lib/audit"
 
+const shiftSalesCache = new Map<string, { data: { dailyStats: any; paymentBreakdown: any; recentOrders: any }; expiresAt: number }>()
+const ACTIVE_SHIFT_CACHE_MS = 25 * 1000
+
+async function fetchShiftWindow(shiftId: string) {
+  const shiftRes = await pool.query(`SELECT start_time, end_time FROM public.shifts WHERE id = $1`, [shiftId])
+  return shiftRes.rows[0] ?? null
+}
+
+function getShiftSalesCacheKey(shiftId: string, deleted: boolean) {
+  return `${shiftId}:${deleted ? "deleted" : "live"}`
+}
+
+async function queryShiftSalesForWindow(shiftWindow: { start: string; end: string | null }, deleted: boolean) {
+  const deletedFilter = deleted ? "AND COALESCE(is_deleted, false) = true" : "AND COALESCE(is_deleted, false) = false"
+  const start = shiftWindow.start
+  const endParam = shiftWindow.end ?? null
+  const [dailyStats, paymentBreakdown, recentOrders] = await Promise.all([
+    pool.query(
+      `SELECT
+         COUNT(*)::int AS total_orders,
+         COUNT(*) FILTER (WHERE COALESCE(status, 'completed') = 'completed')::int AS completed_orders,
+         COALESCE(SUM(grand_total) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_sales,
+         COALESCE(SUM(subtotal) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_subtotal,
+         COALESCE(SUM(service_charge) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_service_charge
+       FROM public.sales
+       WHERE created_at >= $1
+         AND ($2::timestamptz IS NULL OR created_at <= $2)
+         ${deletedFilter}`,
+      [start, endParam]
+    ),
+    pool.query(
+      `SELECT
+         payment_method,
+         COUNT(*)::int AS count,
+         COALESCE(SUM(grand_total), 0)::float AS total
+       FROM public.sales
+       WHERE created_at >= $1
+         AND ($2::timestamptz IS NULL OR created_at <= $2)
+         AND COALESCE(status, 'completed') = 'completed'
+         ${deletedFilter}
+       GROUP BY payment_method
+       ORDER BY total DESC`,
+      [start, endParam]
+    ),
+    pool.query(
+      `SELECT
+         id, order_number, items,
+         subtotal::float, service_charge::float, grand_total::float,
+         COALESCE(discount_percent, 0)::int AS discount_percent,
+         payment_method, server_name, created_by,
+         COALESCE(status, 'completed') AS status,
+         void_reason, created_at,
+         deleted_at, deleted_by
+       FROM public.sales
+       WHERE created_at >= $1
+         AND ($2::timestamptz IS NULL OR created_at <= $2)
+         ${deletedFilter}
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [start, endParam]
+    ),
+  ])
+
+  return {
+    dailyStats: dailyStats.rows[0],
+    paymentBreakdown: paymentBreakdown.rows,
+    recentOrders: recentOrders.rows,
+  }
+}
+
+async function getCachedShiftSales(shiftId: string, deleted: boolean, isPermanent: boolean, shiftWindow: { start: string; end: string | null }) {
+  const cacheKey = getShiftSalesCacheKey(shiftId, deleted)
+  const now = Date.now()
+  const cached = shiftSalesCache.get(cacheKey)
+
+  if (cached && cached.expiresAt > now) {
+    console.log("[SALES/GET] Returning cached shift sales for", cacheKey)
+    return cached.data
+  }
+
+  const data = await queryShiftSalesForWindow(shiftWindow, deleted)
+  shiftSalesCache.set(cacheKey, {
+    data,
+    expiresAt: isPermanent ? Number.MAX_SAFE_INTEGER : now + ACTIVE_SHIFT_CACHE_MS,
+  })
+  return data
+}
+
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions)
   console.log("[SALES API] Session check:", { hasSession: !!session, hasUser: !!session?.user, userId: session?.user?.id, userRole: (session?.user as any)?.role })
@@ -171,68 +259,26 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const date = searchParams.get("date") || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
     const shiftId = searchParams.get("shiftId")
-    let shiftWindow: { start: string; end: string | null } | null = null
-    if (shiftId) {
-      const shiftRes = await pool.query(`SELECT start_time, end_time FROM public.shifts WHERE id = $1`, [shiftId])
-      if (shiftRes.rows.length > 0) {
-        shiftWindow = { start: shiftRes.rows[0].start_time, end: shiftRes.rows[0].end_time ?? null }
-      }
-    }
     const deleted = searchParams.get("deleted") === "true"
     const deletedFilter = deleted ? "AND COALESCE(is_deleted, false) = true" : "AND COALESCE(is_deleted, false) = false"
     console.log("[SALES/GET] Admin fetching sales for date:", date, { deleted, shiftId })
 
-    let dailyStats, paymentBreakdown, recentOrders
-    if (shiftWindow) {
-      const { start, end } = shiftWindow
-      const endParam = end ?? null
-      ;[dailyStats, paymentBreakdown, recentOrders] = await Promise.all([
-        pool.query(
-          `SELECT
-             COUNT(*)::int AS total_orders,
-             COUNT(*) FILTER (WHERE COALESCE(status, 'completed') = 'completed')::int AS completed_orders,
-             COALESCE(SUM(grand_total) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_sales,
-             COALESCE(SUM(subtotal) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_subtotal,
-             COALESCE(SUM(service_charge) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_service_charge
-           FROM public.sales
-           WHERE created_at >= $1
-             AND ($2::timestamptz IS NULL OR created_at <= $2)
-             ${deletedFilter}`,
-          [start, endParam]
-        ),
-        pool.query(
-          `SELECT
-             payment_method,
-             COUNT(*)::int AS count,
-             COALESCE(SUM(grand_total), 0)::float AS total
-           FROM public.sales
-           WHERE created_at >= $1
-             AND ($2::timestamptz IS NULL OR created_at <= $2)
-             AND COALESCE(status, 'completed') = 'completed'
-             ${deletedFilter}
-           GROUP BY payment_method
-           ORDER BY total DESC`,
-          [start, endParam]
-        ),
-        pool.query(
-          `SELECT
-             id, order_number, items,
-             subtotal::float, service_charge::float, grand_total::float,
-             COALESCE(discount_percent, 0)::int AS discount_percent,
-             payment_method, server_name, created_by,
-             COALESCE(status, 'completed') AS status,
-             void_reason, created_at,
-             deleted_at, deleted_by
-           FROM public.sales
-           WHERE created_at >= $1
-             AND ($2::timestamptz IS NULL OR created_at <= $2)
-             ${deletedFilter}
-           ORDER BY created_at DESC
-           LIMIT 50`,
-          [start, endParam]
-        ),
-      ])
-    } else {
+    let dailyStats: { rows: any[] } | undefined
+    let paymentBreakdown: { rows: any[] } | undefined
+    let recentOrders: { rows: any[] } | undefined
+    if (shiftId) {
+      const shiftRow = await fetchShiftWindow(shiftId)
+      if (shiftRow) {
+        const shiftWindow = { start: shiftRow.start_time, end: shiftRow.end_time ?? null }
+        const isPermanent = !!shiftRow.end_time
+        const cached = await getCachedShiftSales(shiftId, deleted, isPermanent, shiftWindow)
+        dailyStats = { rows: [cached.dailyStats] }
+        paymentBreakdown = { rows: cached.paymentBreakdown }
+        recentOrders = { rows: cached.recentOrders }
+      }
+    }
+
+    if (!dailyStats) {
       ;[dailyStats, paymentBreakdown, recentOrders] = await Promise.all([
         pool.query(
           `SELECT
@@ -277,18 +323,22 @@ export async function GET(request: Request) {
         ),
       ])
     }
-    console.log("[SALES/GET] Admin query results:", { 
-      totalOrders: dailyStats.rows[0]?.total_orders,
-      completedOrders: dailyStats.rows[0]?.completed_orders,
-      recentOrdersCount: recentOrders.rows.length,
-      recentOrders: recentOrders.rows.map(o => ({ id: o.id, order_number: o.order_number, created_by: o.created_by, server_name: o.server_name }))
+    const safeDailyStats = dailyStats ?? { rows: [{ total_orders: 0, completed_orders: 0, total_sales: 0, total_subtotal: 0, total_service_charge: 0 }] }
+    const safePaymentBreakdown = paymentBreakdown ?? { rows: [] }
+    const safeRecentOrders = recentOrders ?? { rows: [] }
+
+    console.log("[SALES/GET] Admin query results:", {
+      totalOrders: safeDailyStats.rows[0]?.total_orders,
+      completedOrders: safeDailyStats.rows[0]?.completed_orders,
+      recentOrdersCount: safeRecentOrders.rows.length,
+      recentOrders: safeRecentOrders.rows.map((o: any) => ({ id: o.id, order_number: o.order_number, created_by: o.created_by, server_name: o.server_name })),
     })
 
     return NextResponse.json({
       date,
-      stats: dailyStats.rows[0],
-      paymentBreakdown: paymentBreakdown.rows,
-      recentOrders: recentOrders.rows,
+      stats: safeDailyStats.rows[0],
+      paymentBreakdown: safePaymentBreakdown.rows,
+      recentOrders: safeRecentOrders.rows,
     })
   } catch (error) {
     console.error("Failed to fetch sales:", error)
