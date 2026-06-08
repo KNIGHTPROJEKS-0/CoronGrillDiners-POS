@@ -53,6 +53,10 @@ export async function GET(request: Request) {
     })
   } catch (error) {
     console.error("Failed to fetch analytics:", error)
-    return NextResponse.json({ error: "Failed to fetch analytics" }, { status: 500 })
+    // Return fallback data instead of 500
+    return NextResponse.json({
+      weeklyTrend: [],
+      topItems: [],
+    })
   }
 }
