@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Search, Loader2, LayoutDashboard, AlertTriangle, RefreshCw } from "lucide-react"
+import { Search, Loader2, LayoutDashboard, AlertTriangle, RefreshCw, Wifi, WifiOff } from "lucide-react"
 import { useSession } from "next-auth/react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import ProductGrid from "../components/product-grid"
 import CartSidebar from "../components/cart-sidebar"
 import CategorySidebar from "../components/category-sidebar"
@@ -13,6 +14,7 @@ import ShiftStartModal from "../components/shift-start-modal"
 import ShiftCloseModal from "../components/shift-close-modal"
 import { useShift } from "@/hooks/use-shift"
 import { useProducts } from "../context/product-context"
+import { useOnlineStatus, useOfflineSync } from "@/hooks/use-offline-sync"
 
 export default function AdminPOSPage() {
   const [searchQuery, setSearchQuery] = useState("")
@@ -20,6 +22,8 @@ export default function AdminPOSPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
   const { isEditMode, toggleEditMode } = useProducts()
+  const isOnline = useOnlineStatus()
+  useOfflineSync()
 
   const {
     shift,
@@ -82,6 +86,22 @@ export default function AdminPOSPage() {
               )}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Connection status badge */}
+              <Badge
+                variant="outline"
+                className={`flex items-center gap-1.5 text-xs font-medium ${
+                  isOnline
+                    ? "border-green-300 bg-green-50 text-green-700"
+                    : "border-red-300 bg-red-50 text-red-700"
+                }`}
+              >
+                {isOnline ? (
+                  <Wifi className="h-3 w-3" />
+                ) : (
+                  <WifiOff className="h-3 w-3" />
+                )}
+                {isOnline ? "Online" : "Offline"}
+              </Badge>
               <Button
                 variant={isEditMode ? "default" : "outline"}
                 size="sm"
