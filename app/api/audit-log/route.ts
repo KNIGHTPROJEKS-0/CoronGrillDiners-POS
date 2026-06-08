@@ -13,10 +13,16 @@ export async function GET(request: Request) {
   const actorId = searchParams.get("actor_id")
   const action = searchParams.get("action")
   const category = searchParams.get("category") // "account", "order", "shift", "menu", "system"
-  const limit = Math.min(parseInt(searchParams.get("limit") || "200"), 500)
+  const includeArchived = searchParams.get("includeArchived") === "true"
+  const limit = Math.min(parseInt(searchParams.get("limit") || "10000"), 50000)
 
   const conditions: string[] = []
   const values: unknown[] = []
+
+  // Filter archived entries by default
+  if (!includeArchived) {
+    conditions.push("archived = false")
+  }
 
   if (actorId) {
     const parsed = Number(actorId)
@@ -48,7 +54,7 @@ export async function GET(request: Request) {
   try {
     values.push(limit)
     const result = await pool.query(
-      `SELECT id, action, actor_id, actor_username, target_user_id, target_username, details, created_at
+      `SELECT id, action, actor_id, actor_username, target_user_id, target_username, details, created_at, archived
        FROM public.admin_audit_log
        ${where}
        ORDER BY created_at DESC
@@ -61,3 +67,42 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Failed to fetch audit log" }, { status: 500 })
   }
 }
+
+export async function DELETE(request: Request) {
+  const session = await getServerSession(authOptions)
+  if (!session?.user || session.user.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
+  let body: { id?: number }
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 })
+  }
+
+  const { id } = body
+  if (!id || !Number.isFinite(id) || id <= 0) {
+    return NextResponse.json({ error: "Invalid audit log ID" }, { status: 400 })
+  }
+
+  try {
+    const result = await pool.query(
+      `UPDATE public.admin_audit_log
+       SET archived = true
+       WHERE id = $1
+       RETURNING id`,
+      [id]
+    )
+
+    if (result.rows.length === 0) {
+      return NextResponse.json({ error: "Audit log entry not found" }, { status: 404 })
+    }
+
+    return NextResponse.json({ success: true, id })
+  } catch (err) {
+    console.error("Failed to archive audit log entry:", err)
+    return NextResponse.json({ error: "Failed to archive audit log entry" }, { status: 500 })
+  }
+}
+

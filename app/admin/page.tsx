@@ -540,7 +540,7 @@ export default function AdminPage() {
           ) : activeSection === "trash" ? (
             <TrashSection orders={trashOrders} onRefresh={() => fetchTrash(selectedDate)} />
           ) : activeSection === "activity" ? (
-            <AuditLogSection entries={auditLog} />
+            <AuditLogSection entries={auditLog} onRefresh={fetchAuditLog} />
           ) : activeSection === "security" ? (
             <SecurityHistorySection
               entries={securityLog}
@@ -1581,8 +1581,28 @@ const ACTION_CATEGORY: Record<string, ActivityCategory> = {
   void_codes_generated: "order",
 }
 
-function AuditLogSection({ entries }: { entries: AuditEntry[] }) {
+function AuditLogSection({ entries, onRefresh }: { entries: AuditEntry[], onRefresh: () => Promise<void> }) {
   const [filter, setFilter] = useState<ActivityCategory>("all")
+  const [archivingId, setArchivingId] = useState<number | null>(null)
+
+  const handleArchive = async (entry: AuditEntry) => {
+    if (!confirm(`Are you sure you want to archive this log entry?`)) return
+    setArchivingId(entry.id)
+    try {
+      const res = await fetch("/api/audit-log", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: entry.id })
+      })
+      if (res.ok) {
+        await onRefresh()
+      }
+    } catch (err) {
+      console.error("Failed to archive audit log entry:", err)
+    } finally {
+      setArchivingId(null)
+    }
+  }
 
   const visible = filter === "all"
     ? entries
@@ -1637,13 +1657,28 @@ function AuditLogSection({ entries }: { entries: AuditEntry[] }) {
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5 break-words">{entry.details}</p>
                 </div>
-                <div className="flex-shrink-0 text-right">
+                <div className="flex-shrink-0 text-right flex flex-col gap-1 items-end">
+                  <div className="flex gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[10px] text-gray-500 hover:text-gray-700"
+                      onClick={() => handleArchive(entry)}
+                      disabled={archivingId === entry.id}
+                    >
+                      {archivingId === entry.id ? (
+                        <RefreshCw className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Archive className="h-3 w-3" />
+                      )}
+                    </Button>
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     by <span className="font-medium text-foreground">@{entry.actor_username}</span>
                   </p>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     {new Date(entry.created_at).toLocaleString("en-PH", {
-                      month: "short", day: "numeric", year: "numeric",
+                      month: "long", day: "numeric", year: "numeric",
                       hour: "2-digit", minute: "2-digit", hour12: true,
                     })}
                   </p>
