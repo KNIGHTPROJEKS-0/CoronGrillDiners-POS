@@ -595,9 +595,11 @@ model admin_audit_log {
   target_username String?
   details         String?
   created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  archived        Boolean   @default(false)
 
   @@index([created_at(sort: Desc)], map: "idx_admin_audit_log_created_at")
   @@index([actor_id], map: "idx_admin_audit_log_actor_id")
+  @@index([archived], map: "idx_admin_audit_log_archived")
   @@schema("public")
 }
 
