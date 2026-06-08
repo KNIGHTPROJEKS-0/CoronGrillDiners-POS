@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 
 const PENDING_KEY = "cgd-pending-sales"
 
@@ -17,6 +17,7 @@ export interface PendingSale {
   changeAmount: number
   serverName: string
   createdBy: string
+  shiftId?: number
 }
 
 export function savePendingSale(sale: Omit<PendingSale, "pendingId">) {
@@ -58,9 +59,32 @@ async function syncPendingSales() {
   }
 }
 
-export function useOfflineSync() {
+export function useOnlineStatus() {
+  const [isOnline, setIsOnline] = useState<boolean>(
+    typeof navigator !== "undefined" ? navigator.onLine : true
+  )
+
   useEffect(() => {
-    if (navigator.onLine) {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
+
+    return () => {
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
+    }
+  }, [])
+
+  return isOnline
+}
+
+export function useOfflineSync() {
+  const isOnline = useOnlineStatus()
+
+  useEffect(() => {
+    if (isOnline) {
       syncPendingSales()
     }
 
@@ -71,5 +95,16 @@ export function useOfflineSync() {
 
     window.addEventListener("online", handleOnline)
     return () => window.removeEventListener("online", handleOnline)
-  }, [])
+  }, [isOnline])
+
+  // 30-second interval sync
+  useEffect(() => {
+    if (!isOnline) return
+
+    const interval = setInterval(() => {
+      syncPendingSales()
+    }, 30000)
+
+    return () => clearInterval(interval)
+  }, [isOnline])
 }

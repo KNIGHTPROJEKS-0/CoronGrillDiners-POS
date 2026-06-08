@@ -350,6 +350,7 @@ export default function CheckoutPage() {
         changeAmount: change,
         serverName,
         createdBy: session?.user?.name ?? serverName,
+        shiftId: shift?.id,
       })
       toast.warning("Saved offline", {
         description: "No connection. Order will sync when back online.",
@@ -438,16 +439,14 @@ export default function CheckoutPage() {
     setIsBusy(true)
     try {
       const result = await recordSale()
-      if (!result.savedToDb) {
-        if (result.offlineSaved) {
-          toast.error("Order could not be confirmed online. Please retry when online or use Save Only.")
-        }
+      // Proceed even if saved offline!
+      if (!result.savedToDb && !result.offlineSaved) {
         return
       }
       setShowSummaryModal(false)
       
       // Store receipt data and navigate to receipt page for printing
-      // This ensures database save completes before any printing attempts
+      // Works even if saved offline!
       completingRef.current = true
       storeReceiptData(printData, isAdmin ? "/pos" : "/", withKitchenTicket)
       invalidateSnapshot()

@@ -44,3 +44,4 @@ lib/generated/prisma
 .DS_Store
 *.log
 backups/
+.env*
