@@ -1,14 +1,28 @@
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import pool from "@/lib/db"
+import pool, { hasColumn } from "@/lib/db"
 import { logEvent } from "@/lib/audit"
 
 export async function GET() {
   try {
+    // Check if stock column exists
+    const hasStock = await hasColumn("products", "stock")
+    const hasIsDeleted = await hasColumn("products", "is_deleted")
+
+    // Build SELECT clause dynamically
+    const selectColumns = [
+      "id", "name", "price::float", "category", "image_url AS image", "description", "available"
+    ]
+    if (hasStock) selectColumns.push("stock")
+
+    const whereClause = hasIsDeleted ? "WHERE is_deleted = false OR is_deleted IS NULL" : ""
+
     const result = await pool.query(
-      `SELECT id, name, price::float, category, image_url AS image, description, available
-       FROM public.products ORDER BY category, name ASC`
+      `SELECT ${selectColumns.join(", ")}
+       FROM public.products
+       ${whereClause}
+       ORDER BY category, name ASC`
     )
     return NextResponse.json(result.rows)
   } catch (error) {
@@ -24,12 +38,29 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { name, price, category, image, description, available } = await request.json()
+    const { name, price, category, image, description, available, stock } = await request.json()
+    
+    const hasStock = await hasColumn("products", "stock")
+    
+    // Build INSERT columns and values dynamically
+    const columns = ["name", "price", "category", "image_url", "description", "available"]
+    const values = [name, price, category, image || null, description || null, available ?? true]
+    
+    if (hasStock) {
+      columns.push("stock")
+      values.push(stock ?? null)
+    }
+    
+    const placeholders = values.map((_, i) => `$${i + 1}`).join(", ")
+    
+    const returningColumns = ["id", "name", "price::float", "category", "image_url AS image", "description", "available"]
+    if (hasStock) returningColumns.push("stock")
+    
     const result = await pool.query(
-      `INSERT INTO public.products (name, price, category, image_url, description, available)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, name, price::float, category, image_url AS image, description, available`,
-      [name, price, category, image || null, description || null, available ?? true]
+      `INSERT INTO public.products (${columns.join(", ")})
+       VALUES (${placeholders})
+       RETURNING ${returningColumns.join(", ")}`,
+      values
     )
 
     const product = result.rows[0]
@@ -54,11 +85,15 @@ export async function PUT(request: Request) {
   }
 
   try {
-    const { id, name, price, category, image, description, available } = await request.json()
+    const { id, name, price, category, image, description, available, stock } = await request.json()
+    const hasStock = await hasColumn("products", "stock")
 
     // Fetch current values BEFORE the update so we can diff exactly what changed
+    const selectOldColumns = ["name", "price::float", "category", "image_url", "description", "available"]
+    if (hasStock) selectOldColumns.push("stock")
+    
     const before = await pool.query(
-      `SELECT name, price::float, category, image_url, description, available
+      `SELECT ${selectOldColumns.join(", ")}
        FROM public.products WHERE id = $1`,
       [id]
     )
@@ -67,13 +102,27 @@ export async function PUT(request: Request) {
     }
     const old = before.rows[0]
 
+    // Build UPDATE query dynamically
+    const updates = ["name = $1", "price = $2", "category = $3", "image_url = $4", "description = $5", "available = $6", "updated_at = NOW()"]
+    const values = [name, price, category, image || null, description || null, available ?? true]
+    
+    if (hasStock) {
+      updates.push("stock = $7")
+      values.push(stock ?? null)
+      values.push(id) // id becomes $8
+    } else {
+      values.push(id) // id becomes $7
+    }
+    
+    const returningColumns = ["id", "name", "price::float", "category", "image_url AS image", "description", "available"]
+    if (hasStock) returningColumns.push("stock")
+
     const result = await pool.query(
       `UPDATE public.products
-       SET name = $1, price = $2, category = $3, image_url = $4,
-           description = $5, available = $6, updated_at = NOW()
-       WHERE id = $7
-       RETURNING id, name, price::float, category, image_url AS image, description, available`,
-      [name, price, category, image || null, description || null, available ?? true, id]
+       SET ${updates.join(", ")}
+       WHERE id = $${values.length}
+       RETURNING ${returningColumns.join(", ")}`,
+      values
     )
 
     const product = result.rows[0]
@@ -93,6 +142,8 @@ export async function PUT(request: Request) {
       changes.push(`description updated`)
     if (Boolean(old.available) !== Boolean(available))
       changes.push(`availability: ${old.available ? "available" : "unavailable"} → ${available ? "available" : "unavailable"}`)
+    if (hasStock && (old.stock ?? null) !== (stock ?? null))
+      changes.push(`stock: ${old.stock ?? "unlimited"} → ${stock ?? "unlimited"}`)
 
     // Choose action type and detail based on what actually changed
     const onlyAvailabilityChanged =
@@ -120,12 +171,27 @@ export async function DELETE(request: Request) {
 
   try {
     const { id } = await request.json()
+    const hasIsDeleted = await hasColumn("products", "is_deleted")
+    const hasDeletedAt = await hasColumn("products", "deleted_at")
 
     // Get name before deleting
     const check = await pool.query("SELECT name FROM public.products WHERE id = $1", [id])
     const productName = check.rows[0]?.name ?? `ID ${id}`
 
-    await pool.query("DELETE FROM public.products WHERE id = $1", [id])
+    if (hasIsDeleted) {
+      // Soft delete if column exists
+      const updates = ["is_deleted = true"]
+      const values = [id]
+      if (hasDeletedAt) updates.push("deleted_at = NOW()")
+      
+      await pool.query(
+        `UPDATE public.products SET ${updates.join(", ")} WHERE id = $1`,
+        values
+      )
+    } else {
+      // Hard delete if no soft delete columns
+      await pool.query("DELETE FROM public.products WHERE id = $1", [id])
+    }
 
     const username = (session.user as any).username ?? session.user.name
     logEvent(

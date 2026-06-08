@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import pool from "@/lib/db"
+import pool, { hasColumn } from "@/lib/db"
 import bcrypt from "bcryptjs"
 
 function pgErrorCode(err: unknown): string | undefined {
@@ -26,17 +26,23 @@ async function logAuditEvent(
   details: string
 ) {
   try {
+    // Check if admin_audit_log has archived column
+    const hasArchived = await hasColumn("admin_audit_log", "archived")
+    
+    const columns = ["action", "actor_id", "actor_username", "target_user_id", "target_username", "details"]
+    const values: any[] = [action, actor.id, actor.username, target?.id ?? null, target?.username ?? null, details]
+    
+    if (hasArchived) {
+      columns.push("archived")
+      values.push(false) // pg pool accepts boolean
+    }
+    
+    const placeholders = values.map((_, i) => `$${i + 1}`).join(", ")
+    
     await pool.query(
-      `INSERT INTO public.admin_audit_log (action, actor_id, actor_username, target_user_id, target_username, details)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
-        action,
-        actor.id,
-        actor.username,
-        target?.id ?? null,
-        target?.username ?? null,
-        details,
-      ]
+      `INSERT INTO public.admin_audit_log (${columns.join(", ")})
+       VALUES (${placeholders})`,
+      values
     )
   } catch (err) {
     console.error("Failed to write audit log:", err)
