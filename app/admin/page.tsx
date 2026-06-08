@@ -436,22 +436,39 @@ export default function AdminPage() {
             )}
             {/* Shift selector for dashboard: lets admin pick a specific shift to report on */}
             {activeSection === "dashboard" && (
-              <Select
-                onValueChange={(v) => { setSelectedShiftId(v || null); fetchSales(selectedDate, v || null) }}
-                value={selectedShiftId ?? ""}
-              >
-                <SelectTrigger className="w-56 h-8 text-sm">
-                  <SelectValue placeholder="Select shift (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">All day</SelectItem>
-                  {availableShifts.map(s => (
-                    <SelectItem key={s.id} value={String(s.id)}>
-                      {`${new Date(s.start_time).toLocaleTimeString("en-PH", { hour: '2-digit', minute: '2-digit' })} - ${s.end_time ? new Date(s.end_time).toLocaleTimeString("en-PH", { hour: '2-digit', minute: '2-digit' }) : 'now'} · ${s.cashier_name}`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2">
+                <Select
+                  onValueChange={(v) => { setSelectedShiftId(v || null); fetchSales(selectedDate, v || null) }}
+                  value={selectedShiftId ?? ""}
+                >
+                  <SelectTrigger className="w-56 h-8 text-sm">
+                    <SelectValue placeholder="Select shift (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">All day</SelectItem>
+                    {(availableShifts && availableShifts.length > 0) ? availableShifts.map(s => (
+                      <SelectItem key={s.id} value={String(s.id)}>
+                        {`${new Date(s.start_time).toLocaleTimeString("en-PH", { hour: '2-digit', minute: '2-digit' })} - ${s.end_time ? new Date(s.end_time).toLocaleTimeString("en-PH", { hour: '2-digit', minute: '2-digit' }) : 'now'} · ${s.cashier_name}`}
+                      </SelectItem>
+                    )) : null}
+                  </SelectContent>
+                </Select>
+
+                {/* Selected shift label */}
+                {selectedShiftId && (
+                  (() => {
+                    const s = availableShifts?.find(sh => String(sh.id) === selectedShiftId)
+                    if (!s) return null
+                    const start = new Date(s.start_time).toLocaleString("en-PH", { hour: '2-digit', minute: '2-digit', hour12: true })
+                    const end = s.end_time ? new Date(s.end_time).toLocaleString("en-PH", { hour: '2-digit', minute: '2-digit', hour12: true }) : 'now'
+                    return (
+                      <div className="text-sm text-muted-foreground bg-gray-50 border rounded px-2 py-1">
+                        {start} → {end} · {s.cashier_name}
+                      </div>
+                    )
+                  })()
+                )}
+              </div>
             )}
             {showRefresh && (
               <Button variant="outline" size="icon" onClick={() => refreshCurrent(true)} disabled={isLoading}>
