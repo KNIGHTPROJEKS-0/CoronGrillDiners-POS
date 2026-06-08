@@ -685,21 +685,27 @@ function DashboardSection({ data, selectedDate, onRefresh }: { data: SalesData |
                   const isSelected = day === selectedDate
                   const label = fmt(pt?.total_sales ?? 0)
                   return (
-                    <div key={day} className="flex-1 flex flex-col items-center gap-0.5" title={`${day}: ${label}`}>
+                    <div key={day} className="flex-1 flex flex-col items-center gap-0.5 group" title={`${day}: ${label}`}>
                       <span className="text-[9px] text-muted-foreground font-mono leading-tight">
                         {pt && pt.total_sales >= 1000
                           ? `₱${(pt.total_sales / 1000).toFixed(1)}k`
                           : pt ? `₱${pt.total_sales.toFixed(0)}` : ""}
                       </span>
                       <div
-                        className={`w-full rounded-t-md transition-all ${isSelected ? "bg-primary" : pt ? "bg-primary/35 hover:bg-primary/55" : "bg-gray-100"}`}
+                        className={`w-full rounded-t-md transition-all duration-200 ${
+                          isSelected 
+                            ? "bg-gradient-to-t from-amber-600 to-orange-500" 
+                            : pt 
+                              ? "bg-gradient-to-t from-emerald-600 to-emerald-400 group-hover:from-emerald-700 group-hover:to-emerald-500" 
+                              : "bg-gray-100"
+                        }`}
                         style={{ height: `${pct}px` }}
                       />
-                      <span className={`text-[9px] font-semibold ${isSelected ? "text-primary" : "text-muted-foreground"}`}>
+                      <span className={`text-[9px] font-semibold ${isSelected ? "text-orange-600" : "text-muted-foreground group-hover:text-emerald-700"}`}>
                         {new Date(day + "T12:00:00").toLocaleDateString("en-PH", { weekday: "short" }).substring(0, 2)}
                       </span>
                       {pt && (
-                        <span className="text-[8px] text-muted-foreground">{pt.total_orders}</span>
+                        <span className="text-[8px] text-muted-foreground group-hover:text-emerald-700">{pt.total_orders}</span>
                       )}
                     </div>
                   )
@@ -726,16 +732,16 @@ function DashboardSection({ data, selectedDate, onRefresh }: { data: SalesData |
               {analytics.topItems.slice(0, 6).map((item, i) => {
                 const maxQty = analytics.topItems[0]?.total_qty ?? 1
                 return (
-                  <div key={item.name} className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-muted-foreground w-4 text-right flex-shrink-0">{i + 1}</span>
+                  <div key={item.name} className="flex items-center gap-2 group">
+                    <span className="text-[10px] font-bold text-muted-foreground w-4 text-right flex-shrink-0 group-hover:text-emerald-700">{i + 1}</span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-0.5">
-                        <span className="text-xs font-medium truncate pr-2">{item.name}</span>
-                        <span className="text-xs text-muted-foreground flex-shrink-0">{item.total_qty}×</span>
+                        <span className="text-xs font-medium truncate pr-2 group-hover:text-emerald-800">{item.name}</span>
+                        <span className="text-xs text-muted-foreground flex-shrink-0 group-hover:text-emerald-700">{item.total_qty}×</span>
                       </div>
                       <div className="w-full bg-gray-100 rounded-full h-1.5">
                         <div
-                          className="bg-primary/50 h-1.5 rounded-full transition-all"
+                          className="bg-gradient-to-r from-emerald-500 to-emerald-400 h-1.5 rounded-full transition-all duration-300 group-hover:from-emerald-600 group-hover:to-emerald-500"
                           style={{ width: `${(item.total_qty / maxQty) * 100}%` }}
                         />
                       </div>
