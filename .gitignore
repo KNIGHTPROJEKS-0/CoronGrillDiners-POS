@@ -21,6 +21,9 @@ scripts/seed-accounts.js
 scripts/seed-products.js
 scripts/seed-staff.js
 scripts/setup-supabase.js
+scripts/migrate-all-data.js
+scripts/final-migrate.js
+scripts/seed-final-staff.js
 
 # Vercel
 .vercel
