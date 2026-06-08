@@ -1,28 +1,24 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Dependencies
+node_modules
 
-# dependencies
-/node_modules
+# Build outputs
+.next
 
-# next.js
-/.next/
-/out/
+# Environment variables
+.env
+.env.local
+.env.*.local
 
-# production
-/build
+# Temporary migration scripts
+scripts/migrate-neon-to-supabase.ts
+scripts/migrate-neon-to-supabase.js
 
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
+# Prisma
+prisma/migrations
+prisma/dev.db
+lib/generated/prisma
 
-# env files
-.env*
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-/lib/generated/prisma
+# Misc
+.DS_Store
+*.log
+backups/
