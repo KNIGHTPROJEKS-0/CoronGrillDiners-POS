@@ -1507,10 +1507,31 @@ function VoidCodesSection({ codes, onRefresh }: { codes: VoidCodeRow[]; onRefres
     setGenerating(true)
     setGenError("")
     try {
-      const res = await fetch("/api/void-codes", { method: "PUT" })
-      const j = await res.json()
-      if (!res.ok) { setGenError(j.error ?? "Failed to generate codes."); return }
-      await onRefresh()
+      // Ensure cookies are sent and handle non-JSON responses gracefully
+      const res = await fetch("/api/void-codes", {
+        method: "PUT",
+        headers: { "Accept": "application/json" },
+        credentials: "same-origin",
+      })
+
+      let j: any = null
+      try { j = await res.json() } catch (e) { /* ignore - will handle below */ }
+
+      if (!res.ok) {
+        const errMsg = j?.error ?? j?.details ?? `Failed to generate codes (HTTP ${res.status})`
+        setGenError(errMsg)
+        return
+      }
+
+      // Refresh the list; if server returned generated codes, prefer using them
+      try {
+        await onRefresh()
+      } catch {
+        // If refresh fails, surface generated codes so admin can copy them manually
+        if (j?.generated && Array.isArray(j.generated) && j.generated.length > 0) {
+          setGenError(`Generated codes: ${j.generated.join(", ")} — refresh failed to load the updated list.`)
+        }
+      }
     } catch {
       setGenError("Network error.")
     } finally {
