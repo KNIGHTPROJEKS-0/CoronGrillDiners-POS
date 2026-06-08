@@ -3,11 +3,6 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import pool, { hasColumn, makeDeletedFilter } from "@/lib/db"
 
-// Safe column checks cached per request
-async function safeHasShiftId() {
-  try { return await hasColumn("sales", "shift_id") } catch { return false }
-}
-
 // Helper to compute overnight flags and labels
 function addOvernightFields(sale: any) {
   let isOvernightShiftOrder = false
@@ -55,7 +50,7 @@ export async function GET(
     const endTime = shift.end_time ?? new Date().toISOString()
     const hasIsDeleted = await hasColumn("sales", "is_deleted")
     const deletedFilter = makeDeletedFilter(hasIsDeleted, false)
-    const hasShiftIdCol = await safeHasShiftId()
+    const hasShiftIdCol = await hasColumn("sales", "shift_id")
 
     const shiftIdCondition = hasShiftIdCol ? "OR shift_id = $5" : ""
     const salesParams: any[] = [shift.cashier_name, shift.cashier_username, shift.start_time, endTime]
