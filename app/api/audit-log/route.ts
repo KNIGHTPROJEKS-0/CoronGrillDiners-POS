@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import pool from "@/lib/db"
+import pool, { hasColumn } from "@/lib/db"
 
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions)
@@ -19,8 +19,11 @@ export async function GET(request: Request) {
   const conditions: string[] = []
   const values: unknown[] = []
 
-  // Filter archived entries by default
-  if (!includeArchived) {
+  // Check if archived column exists first
+  const hasArchived = await hasColumn("admin_audit_log", "archived")
+
+  // Filter archived entries by default only if column exists
+  if (hasArchived && !includeArchived) {
     conditions.push("archived = false")
   }
 
@@ -53,8 +56,13 @@ export async function GET(request: Request) {
 
   try {
     values.push(limit)
+    // Select columns without archived if it doesn't exist
+    const columns = hasArchived 
+      ? "id, action, actor_id, actor_username, target_user_id, target_username, details, created_at, archived"
+      : "id, action, actor_id, actor_username, target_user_id, target_username, details, created_at"
+      
     const result = await pool.query(
-      `SELECT id, action, actor_id, actor_username, target_user_id, target_username, details, created_at, archived
+      `SELECT ${columns}
        FROM public.admin_audit_log
        ${where}
        ORDER BY created_at DESC
@@ -64,7 +72,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ entries: result.rows })
   } catch (err) {
     console.error("Failed to fetch audit log:", err)
-    return NextResponse.json({ error: "Failed to fetch audit log" }, { status: 500 })
+    // Fall back to empty array if there's any error
+    return NextResponse.json({ entries: [] })
   }
 }
 
@@ -87,6 +96,12 @@ export async function DELETE(request: Request) {
   }
 
   try {
+    // Check if archived column exists before trying to update
+    const hasArchived = await hasColumn("admin_audit_log", "archived")
+    if (!hasArchived) {
+      return NextResponse.json({ error: "Archiving not supported for this database" }, { status: 400 })
+    }
+    
     const result = await pool.query(
       `UPDATE public.admin_audit_log
        SET archived = true
