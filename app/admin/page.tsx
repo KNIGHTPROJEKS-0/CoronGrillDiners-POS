@@ -132,6 +132,7 @@ export default function AdminPage() {
   const [salesData, setSalesData] = useState<SalesData | null>(null)
   const [availableShifts, setAvailableShifts] = useState<ShiftRecord[]>([])
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null)
+  const [isMounted, setIsMounted] = useState(false)
   const [trashOrders, setTrashOrders] = useState<TrashOrder[]>([])
   const [staff, setStaff] = useState<StaffUser[]>([])
   const [auditLog, setAuditLog] = useState<AuditEntry[]>([])
@@ -151,12 +152,19 @@ export default function AdminPage() {
   // ── Data fetchers ──────────────────────────────────────────────────────────
 
   const fetchSales = useCallback(async (date: string, shiftId?: string | null) => {
-    const params = new URLSearchParams()
-    params.set("date", date)
-    if (shiftId) params.set("shiftId", shiftId)
-    const res = await fetch(`/api/sales?${params.toString()}`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    setSalesData(await res.json())
+    try {
+      const params = new URLSearchParams()
+      params.set("date", date)
+      if (shiftId) params.set("shiftId", shiftId)
+      const res = await fetch(`/api/sales?${params.toString()}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setSalesData(await res.json())
+      setSectionError(false)
+    } catch (error) {
+      console.error("Failed to fetch sales:", error)
+      setSalesData(null)
+      setSectionError(true)
+    }
   }, [])
 
   const fetchShiftsForDate = useCallback(async (date: string) => {
@@ -165,8 +173,11 @@ export default function AdminPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const j = await res.json()
       setAvailableShifts(j.shifts ?? [])
+      setSectionError(false)
     } catch (e) {
+      console.error("Failed to fetch shifts:", e)
       setAvailableShifts([])
+      setSectionError(true)
     }
   }, [])
 
@@ -211,7 +222,7 @@ export default function AdminPage() {
     if (firstLoad || forceSpinner) setIsLoading(true)
     setSectionError(false)
     try {
-      if (activeSection === "dashboard") await fetchSales(selectedDate)
+      if (activeSection === "dashboard") await fetchSales(selectedDate, selectedShiftId)
       else if (activeSection === "shifts") setShiftsKey(k => k + 1)
       else if (activeSection === "sales") setSalesKey(k => k + 1)
       else if (activeSection === "trash") await fetchTrash(selectedDate)
@@ -234,6 +245,10 @@ export default function AdminPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection, selectedDate, status, isAdmin])
+
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
 
   // Prefetch the POS route so navigation is instant
   useEffect(() => {
@@ -341,6 +356,14 @@ export default function AdminPage() {
     )
   }
 
+  if (!isMounted) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
   const showDatePicker = activeSection === "dashboard" || activeSection === "shifts"
   const showRefresh = activeSection !== "menu" && activeSection !== "sales"
 
@@ -438,26 +461,34 @@ export default function AdminPage() {
             {activeSection === "dashboard" && (
               <div className="flex items-center gap-2">
                 <Select
-                  onValueChange={(v) => { setSelectedShiftId(v || null); fetchSales(selectedDate, v || null) }}
-                  value={selectedShiftId ?? ""}
+                  onValueChange={(v) => {
+                    const nextShift = v === "all" ? null : v
+                    setSelectedShiftId(nextShift)
+                    fetchSales(selectedDate, nextShift)
+                  }}
+                  value={selectedShiftId ?? "all"}
                 >
                   <SelectTrigger className="w-56 h-8 text-sm">
                     <SelectValue placeholder="Select shift (optional)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All day</SelectItem>
-                    {(availableShifts && availableShifts.length > 0) ? availableShifts.map(s => (
-                      <SelectItem key={s.id} value={String(s.id)}>
-                        {`${new Date(s.start_time).toLocaleTimeString("en-PH", { hour: '2-digit', minute: '2-digit' })} - ${s.end_time ? new Date(s.end_time).toLocaleTimeString("en-PH", { hour: '2-digit', minute: '2-digit' }) : 'now'} · ${s.cashier_name}`}
-                      </SelectItem>
-                    )) : null}
+                    <SelectItem value="all">All day</SelectItem>
+                    {(availableShifts || []).map((s, index) => {
+                      const shiftValue = String(s.id ?? (s as any).shift_id ?? index)
+                      if (!shiftValue || shiftValue === "undefined" || shiftValue === "null") return null
+                      return (
+                        <SelectItem key={shiftValue} value={shiftValue}>
+                          {`${new Date(s.start_time).toLocaleTimeString("en-PH", { hour: '2-digit', minute: '2-digit' })} - ${s.end_time ? new Date(s.end_time).toLocaleTimeString("en-PH", { hour: '2-digit', minute: '2-digit' }) : 'now'} · ${s.cashier_name}`}
+                        </SelectItem>
+                      )
+                    })}
                   </SelectContent>
                 </Select>
 
                 {/* Selected shift label */}
                 {selectedShiftId && (
                   (() => {
-                    const s = availableShifts?.find(sh => String(sh.id) === selectedShiftId)
+                    const s = (availableShifts || []).find(sh => String(sh.id ?? (sh as any).shift_id ?? "") === selectedShiftId)
                     if (!s) return null
                     const start = new Date(s.start_time).toLocaleString("en-PH", { hour: '2-digit', minute: '2-digit', hour12: true })
                     const end = s.end_time ? new Date(s.end_time).toLocaleString("en-PH", { hour: '2-digit', minute: '2-digit', hour12: true }) : 'now'
