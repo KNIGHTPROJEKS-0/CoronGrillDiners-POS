@@ -1129,16 +1129,18 @@ function ShiftsSection({ selectedDate, onRefresh }: { selectedDate: string; onRe
     setLoadingOrdersFor(shiftId)
     try {
       const res = await fetch(`/api/shifts/${shiftId}/sales`)
-      if (res.ok) {
-        const j = await res.json()
-        const sales: SaleRecord[] = j.sales ?? []
-        setShiftOrders(prev => ({ ...prev, [shiftId]: sales }))
-        return sales
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        console.error("[fetchShiftOrders] API error:", res.status, body?.error, body?.detail)
+        return []
       }
+      const j = await res.json()
+      const sales: SaleRecord[] = j.sales ?? []
+      setShiftOrders(prev => ({ ...prev, [shiftId]: sales }))
+      return sales
     } finally {
       setLoadingOrdersFor(null)
     }
-    return []
   }
 
   const handleViewOrders = async (shiftId: number) => {
