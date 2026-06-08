@@ -218,7 +218,7 @@ export default function ProductModal({ isOpen, onClose, product, mode }: Product
             <p className="text-[11px] text-muted-foreground leading-tight">
               Leave blank for unlimited. Set a number to track inventory — it decreases
               automatically with each sale. When it reaches 0 the item shows as
-              "Out of Stock" in the cashier POS.
+              &quot;Out of Stock&quot; in the cashier POS.
             </p>
           </div>
 

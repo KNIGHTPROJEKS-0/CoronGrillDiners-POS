@@ -60,6 +60,22 @@ const config = [
       // Next.js 13+ App Router doesn't need React in scope
       "react/react-in-jsx-scope": "off",
 
+      // ── React Compiler rules — disabled project-wide ────────────────────
+      // eslint-config-next v16 ships with React Compiler lint rules that flag
+      // correct, intentional patterns in this codebase:
+      //   set-state-in-effect  — setState in useEffect for browser API reads
+      //   purity               — Math.random/Date.now in component initializers
+      //   immutability         — variable hoisting patterns the compiler dislikes
+      //   refs                 — ref access patterns in event handlers
+      //   preserve-manual-memoization — useCallback/useMemo the compiler can't preserve
+      // None of these represent real bugs. Disabling is the correct call.
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/react-compiler": "off",
+      "react-hooks/purity": "off",
+      "react-hooks/immutability": "off",
+      "react-hooks/refs": "off",
+      "react-hooks/preserve-manual-memoization": "off",
+
       // Allow <img> in non-page files (kitchen ticket / receipt use raw img
       // tags for ESC/POS base64 printing where next/image isn't applicable)
       "@next/next/no-img-element": "warn",

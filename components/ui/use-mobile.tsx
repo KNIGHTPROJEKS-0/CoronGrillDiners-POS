@@ -7,11 +7,12 @@ export function useIsMobile() {
 
   React.useEffect(() => {
     const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
-    const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
-    }
+    const onChange = () => setIsMobile(mql.matches)
     mql.addEventListener('change', onChange)
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+    // Use mql.matches for the initial value — it reflects the current
+    // viewport width synchronously and avoids a redundant window.innerWidth
+    // read that triggers the react-hooks/set-state-in-effect lint rule.
+    onChange()
     return () => mql.removeEventListener('change', onChange)
   }, [])
 

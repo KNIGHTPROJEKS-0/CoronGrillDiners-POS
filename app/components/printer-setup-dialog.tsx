@@ -344,8 +344,8 @@ export default function PrinterSetupDialog({ open, onOpenChange }: PrinterSetupD
           <p className="font-semibold">Setup tips:</p>
           <p>• <strong>Cashier printer:</strong> <span className="font-mono">RPP02N</span> — connects via Bluetooth.</p>
           <p>• <strong>Kitchen printer:</strong> <span className="font-mono">POS58D</span> — connects via Bluetooth.</p>
-          <p>• <strong>Bluetooth:</strong> Pair the printer in your phone/PC Bluetooth settings first. Then click "Bluetooth" here — the picker will show only the correct device. If asked, confirm the pairing code on both devices.</p>
-          <p>• <strong>USB:</strong> Connect the USB cable, click "USB", then pick the printer port from the browser dialog.</p>
+          <p>• <strong>Bluetooth:</strong> Pair the printer in your phone/PC Bluetooth settings first. Then click &quot;Bluetooth&quot; here — the picker will show only the correct device. If asked, confirm the pairing code on both devices.</p>
+          <p>• <strong>USB:</strong> Connect the USB cable, click &quot;USB&quot;, then pick the printer port from the browser dialog.</p>
           <p>• Once connected, the app remembers and auto-reconnects on your next visit (no dialog needed).</p>
           <p>• Use <strong>Chrome</strong> on Android or desktop for best compatibility (HTTPS required).</p>
         </div>
