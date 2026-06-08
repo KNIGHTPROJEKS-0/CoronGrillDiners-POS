@@ -17,6 +17,11 @@ interface ReceiptEntry {
    *  auto-print on mount. The kitchen preview card and manual Print Kitchen
    *  Receipt button always render whenever kitchenText is present. */
   autoPrintKitchen?: boolean
+  /** Controls whether ANY printing happens automatically on mount.
+   *  Undefined/true → auto-print (normal checkout flow).
+   *  false → manual only: the page just renders the receipt + print buttons
+   *  so the cashier can reprint to both printers reliably (used by reprint). */
+  autoPrint?:        boolean
   orderNumber:       string
   printDataJson:     string
   returnPath:        string
@@ -67,6 +72,13 @@ export default function ReceiptPage() {
   useEffect(() => {
     if (!entry || autoPrintedRef.current) return
     autoPrintedRef.current = true
+    // Reprint flow: skip auto-printing entirely. The cashier reviews the
+    // receipt and taps "Print Cashier Receipt" / "Print Kitchen Ticket" to
+    // print to both printers reliably (same path as Printer Setup test prints).
+    if (entry.autoPrint === false) {
+      toast.info('Tap Print Cashier Receipt and Print Kitchen Ticket to reprint.')
+      return
+    }
     let pd: PrintData | null = null
     try { pd = JSON.parse(entry.printDataJson) } catch {}
     if (!pd) return

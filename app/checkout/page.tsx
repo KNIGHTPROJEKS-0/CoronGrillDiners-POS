@@ -123,6 +123,7 @@ function storeReceiptData(d: import("@/lib/escpos").PrintData, returnPath: strin
       receiptText,
       kitchenText,
       autoPrintKitchen: withKitchen,
+      autoPrint: true,
       orderNumber: d.orderNumber,
       printDataJson: JSON.stringify(d),
       returnPath,

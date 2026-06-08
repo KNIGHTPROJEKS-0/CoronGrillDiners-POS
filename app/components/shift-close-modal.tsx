@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { signOut } from "next-auth/react"
-import { Wallet, CheckCircle, AlertTriangle, TrendingUp, TrendingDown, Loader2, Printer, LogOut } from "lucide-react"
+import { Wallet, CheckCircle, AlertTriangle, TrendingUp, Loader2, Printer, LogOut, EyeOff } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -42,8 +42,6 @@ export default function ShiftCloseModal({ open, shift, onClose, onOpenChange }: 
   const [isSigningOut, setIsSigningOut] = useState(false)
 
   const amount = parseFloat(actualCash) || 0
-  const estimatedExpected = shift.start_balance + (shift.total_cash_sales || 0)
-  const estimatedDiscrepancy = actualCash !== "" ? amount - estimatedExpected : null
 
   // Auto-logout countdown after shift is closed
   useEffect(() => {
@@ -331,14 +329,18 @@ export default function ShiftCloseModal({ open, shift, onClose, onOpenChange }: 
           </div>
           <DialogTitle className="text-center">Close Shift</DialogTitle>
           <DialogDescription className="text-center text-xs">
-            Started at {formatTime(shift.start_time)} · Count your drawer and enter the actual cash.
+            Started at {formatTime(shift.start_time)} · Count your drawer and enter the actual cash to tally.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-1.5 text-sm bg-muted/40 rounded-lg p-3 mt-2">
           <div className="flex justify-between"><span className="text-muted-foreground">Starting Cash</span><span className="font-mono">{fmt(shift.start_balance)}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Cash Sales <span className="text-[10px] text-gray-400">(cash payments only)</span></span><span className="font-mono text-green-600">+{fmt(shift.total_cash_sales || 0)}</span></div>
-          <div className="flex justify-between font-semibold border-t pt-1.5"><span>Expected in Drawer</span><span className="font-mono">{fmt(estimatedExpected)}</span></div>
+          <div className="flex items-center gap-2 border-t pt-2 text-muted-foreground">
+            <EyeOff className="h-4 w-4 flex-shrink-0" />
+            <span className="text-xs">
+              Cash sales &amp; expected drawer total are hidden. Count your drawer first — the tally is revealed after you close the shift.
+            </span>
+          </div>
         </div>
 
         <form onSubmit={handleClose} className="space-y-3 mt-1">
@@ -358,13 +360,6 @@ export default function ShiftCloseModal({ open, shift, onClose, onOpenChange }: 
               className="text-lg font-mono"
             />
           </div>
-
-          {actualCash !== "" && estimatedDiscrepancy !== null && (
-            <div className={`flex justify-between rounded-lg px-3 py-2 text-sm font-semibold ${estimatedDiscrepancy === 0 ? "bg-green-50 text-green-700" : estimatedDiscrepancy > 0 ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"}`}>
-              <span>{estimatedDiscrepancy > 0 ? "Extra Cash" : estimatedDiscrepancy < 0 ? "Missing Cash" : "Balanced ✓"}</span>
-              <span className="font-mono">{estimatedDiscrepancy >= 0 ? "+" : "-"}{fmt(Math.abs(estimatedDiscrepancy))}</span>
-            </div>
-          )}
 
           {error && (
             <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-md">{error}</p>
