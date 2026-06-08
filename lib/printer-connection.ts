@@ -315,7 +315,10 @@ export async function disconnectPrinter(role: PrinterRole): Promise<void> {
 
 // ─── Print ─────────────────────────────────────────────────────────────────────
 
-/** Send raw ESC/POS bytes to printer. Returns the method used. */
+/** Send raw ESC/POS bytes to printer. Returns the method used.
+ *  For BLE connections, automatically attempts a silent reconnection if the
+ *  GATT characteristic is missing (e.g. printer went to sleep / out of range).
+ *  This is critical for kitchen printer reprint reliability. */
 export async function printTo(role: PrinterRole, data: Uint8Array): Promise<'usb' | 'bluetooth' | 'none'> {
   const port = usbPorts[role]
   if (port) {
@@ -329,15 +332,48 @@ export async function printTo(role: PrinterRole, data: Uint8Array): Promise<'usb
     return 'usb'
   }
 
-  const char = btChars[role]
-  if (char) {
-    for (let i = 0; i < data.length; i += BLE_CHUNK) {
-      await char.writeValue(data.slice(i, i + BLE_CHUNK))
-      if (i + BLE_CHUNK < data.length) {
-        await new Promise(r => setTimeout(r, BLE_DELAY))
-      }
+  let char = btChars[role]
+
+  // ── Auto-reconnect BLE if characteristic was lost (sleep/disconnect) ──
+  if (!char) {
+    const reconnected = await autoReconnectBluetooth(role)
+    if (reconnected) {
+      char = btChars[role]
     }
-    return 'bluetooth'
+  }
+
+  if (char) {
+    try {
+      for (let i = 0; i < data.length; i += BLE_CHUNK) {
+        await char.writeValue(data.slice(i, i + BLE_CHUNK))
+        if (i + BLE_CHUNK < data.length) {
+          await new Promise(r => setTimeout(r, BLE_DELAY))
+        }
+      }
+      return 'bluetooth'
+    } catch (writeErr) {
+      // Write failed on a stale characteristic — try one silent reconnect + retry
+      console.warn(`[printer] BLE write failed for ${role}, attempting reconnect…`, writeErr)
+      delete btChars[role]
+      status[role] = { connected: false, name: '', type: null }
+      notify()
+
+      const reconnected = await autoReconnectBluetooth(role)
+      if (reconnected) {
+        char = btChars[role]
+        if (char) {
+          for (let i = 0; i < data.length; i += BLE_CHUNK) {
+            await char.writeValue(data.slice(i, i + BLE_CHUNK))
+            if (i + BLE_CHUNK < data.length) {
+              await new Promise(r => setTimeout(r, BLE_DELAY))
+            }
+          }
+          return 'bluetooth'
+        }
+      }
+      // Reconnect failed — fall through to 'none'
+      return 'none'
+    }
   }
 
   return 'none'

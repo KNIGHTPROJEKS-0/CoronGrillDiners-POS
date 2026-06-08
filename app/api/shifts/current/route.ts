@@ -96,8 +96,18 @@ export async function GET() {
       [session.user.id]
     )
 
+    const shift = result.rows[0] ?? null
+
+    // ── Blind close: hide running sales totals from non-admin users ──
+    // Cashiers should not see expected/actual cash totals until after they
+    // submit their counted amount and the shift is fully closed.
+    if (shift && (session.user as any).role !== "admin") {
+      shift.total_cash_sales = 0
+      shift.total_sales = 0
+    }
+
     return NextResponse.json({
-      shift: result.rows[0] ?? null,
+      shift,
       staleShiftsClosed: staleResult.rows.length,
     })
   } catch (error) {

@@ -44,7 +44,8 @@ export default function ShiftCloseModal({ open, shift, onClose, onOpenChange }: 
 
   const amount = parseFloat(actualCash) || 0
   const estimatedExpected = shift.start_balance + (shift.total_cash_sales || 0)
-  const estimatedDiscrepancy = isSubmitted && actualCash !== "" ? amount - estimatedExpected : null
+  // Discrepancy preview only shown AFTER shift is actually closed (blind close)
+  const estimatedDiscrepancy = isSubmitted && actualCash !== "" && closedShift ? amount - estimatedExpected : null
 
   // Auto-logout countdown after shift is closed
   useEffect(() => {
@@ -345,21 +346,12 @@ export default function ShiftCloseModal({ open, shift, onClose, onOpenChange }: 
 
         <div className="space-y-1.5 text-sm bg-muted/40 rounded-lg p-3 mt-2">
           <div className="flex justify-between"><span className="text-muted-foreground">Starting Cash</span><span className="font-mono">{fmt(shift.start_balance)}</span></div>
-          {!isSubmitted ? (
-            <p className="text-sm text-muted-foreground mt-2">
-              Enter your counted cash and verify before totals are revealed.
-            </p>
-          ) : (
-            <>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">
-                  Cash Sales <span className="text-[10px] text-gray-400">(cash payments only)</span>
-                </span>
-                <span className="font-mono text-green-600">+{fmt(shift.total_cash_sales || 0)}</span>
-              </div>
-              <div className="flex justify-between font-semibold border-t pt-1.5"><span>Expected in Drawer</span><span className="font-mono">{fmt(estimatedExpected)}</span></div>
-            </>
-          )}
+          {isSubmitted ? (
+            <div className="flex justify-between items-center py-1">
+              <span className="text-muted-foreground text-sm">Counted cash submitted</span>
+              <span className="font-mono font-semibold text-sm">{fmt(amount)}</span>
+            </div>
+          ) : null}
         </div>
 
         <form onSubmit={handleClose} className="space-y-3 mt-1">
@@ -383,9 +375,9 @@ export default function ShiftCloseModal({ open, shift, onClose, onOpenChange }: 
             />
           </div>
 
-          {actualCash !== "" && estimatedDiscrepancy !== null && (
+          {actualCash !== "" && estimatedDiscrepancy !== null && closedShift && (
             <div className={`flex justify-between rounded-lg px-3 py-2 text-sm font-semibold ${estimatedDiscrepancy === 0 ? "bg-green-50 text-green-700" : estimatedDiscrepancy > 0 ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"}`}>
-              <span>{estimatedDiscrepancy > 0 ? "Extra Cash" : estimatedDiscrepancy < 0 ? "Missing Cash" : "Balanced ✓"}</span>
+              <span>{estimatedDiscrepancy > 0 ? "Extra Cash" : estimatedDiscrepancy < 0 ? "Missing Cash" : "Balanced \u2713"}</span>
               <span className="font-mono">{estimatedDiscrepancy >= 0 ? "+" : "-"}{fmt(Math.abs(estimatedDiscrepancy))}</span>
             </div>
           )}
@@ -413,7 +405,7 @@ export default function ShiftCloseModal({ open, shift, onClose, onOpenChange }: 
               disabled={isLoading || !isSubmitted}
             >
               {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              {isLoading ? "Closing..." : "Close Shift"}
+              {isLoading ? "Closing..." : "Submit & Close"}
             </Button>
           </div>
         </form>
