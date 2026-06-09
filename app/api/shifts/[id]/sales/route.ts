@@ -64,40 +64,52 @@ export async function GET(
     }
 
     const shift = shiftResult.rows[0];
+    const shiftStartTime = shift.start_time ?? null;
     const endTime = shift.end_time ?? new Date().toISOString();
-    const cashierLookup = String(
-      shift.cashier_username ?? shift.cashier_name ?? "",
-    );
+    const cashierLookup = shift.cashier_username ?? shift.cashier_name ?? "";
+    const safeCashierLookup =
+      typeof cashierLookup === "string" ? cashierLookup.trim() : "";
     const hasIsDeleted = await hasColumn("sales", "is_deleted");
     const deletedFilter = makeDeletedFilter(hasIsDeleted, false);
     const hasShiftIdCol = await hasColumn("sales", "shift_id");
-    const queryParams = [shiftId, cashierLookup, shift.start_time, endTime];
 
-    // Stable parameter mapping for all queries:
-    // $1 = shift_id::int, $2 = cashier lookup::text,
-    // $3 = start_time::timestamptz, $4 = end_time::timestamptz
+    if (!shiftStartTime) {
+      return NextResponse.json(
+        { error: "Shift is missing a valid start_time" },
+        { status: 500 },
+      );
+    }
+
     let salesResult: { rows: any[] } = { rows: [] };
     let matchMethod = "none";
 
     if (hasShiftIdCol) {
-      const q = `SELECT ${SELECT_COLUMNS}, $3::timestamptz AS shift_start_time
+      const shiftIdQuery = `SELECT ${SELECT_COLUMNS}, $2::timestamptz AS shift_start_time
         FROM public.sales
         WHERE shift_id = $1::int ${deletedFilter}
         ORDER BY created_at ASC`;
-      salesResult = await pool.query(q, queryParams);
+      const shiftIdParams = [shiftId, shiftStartTime];
+      salesResult = await pool.query(shiftIdQuery, shiftIdParams);
       if (salesResult.rows.length > 0) matchMethod = "shift_id";
     }
 
     if (salesResult.rows.length === 0) {
-      const nameQ = `SELECT ${SELECT_COLUMNS}, $3::timestamptz AS shift_start_time
+      const fallbackQuery = `SELECT ${SELECT_COLUMNS}, $2::timestamptz AS shift_start_time
         FROM public.sales
-        WHERE (created_by = $2::text OR server_name = $2::text OR shift_id = $1::int)
-          AND created_at >= $3::timestamptz
-          AND created_at <= $4::timestamptz
+        WHERE created_at >= $2::timestamptz
+          AND created_at <= $3::timestamptz
+          AND (
+            $1::text = ''
+            OR COALESCE(created_by, '') = $1::text
+            OR COALESCE(server_name, '') = $1::text
+          )
           ${deletedFilter}
         ORDER BY created_at ASC`;
-      salesResult = await pool.query(nameQ, queryParams);
-      if (salesResult.rows.length > 0) matchMethod = "name+time";
+      const fallbackParams = [safeCashierLookup, shiftStartTime, endTime];
+      salesResult = await pool.query(fallbackQuery, fallbackParams);
+      if (salesResult.rows.length > 0) {
+        matchMethod = safeCashierLookup ? "cashier+time" : "time_window";
+      }
     }
 
     // ── Diagnostic logging (temporary) ──────────────────────────────────────
@@ -108,6 +120,8 @@ export async function GET(
       JSON.stringify(shift.cashier_name),
       "cashier_username:",
       JSON.stringify(shift.cashier_username),
+      "cashier_lookup:",
+      JSON.stringify(safeCashierLookup),
       "start_time:",
       shift.start_time,
       "end_time:",

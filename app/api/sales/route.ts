@@ -47,7 +47,9 @@ const ACTIVE_SHIFT_CACHE_MS = 25 * 1000;
 
 async function fetchShiftWindow(shiftId: number) {
   const shiftRes = await pool.query(
-    `SELECT start_time, end_time FROM public.shifts WHERE id = $1::int`,
+    `SELECT start_time, end_time, cashier_name, cashier_username
+     FROM public.shifts
+     WHERE id = $1::int`,
     [shiftId],
   );
   return shiftRes.rows[0] ?? null;
@@ -60,6 +62,7 @@ function getShiftSalesCacheKey(shiftId: number, deleted: boolean) {
 async function queryShiftSalesForWindow(
   shiftWindow: { start: string; end: string | null },
   deleted: boolean,
+  cashierLookup = "",
 ) {
   const hasIsDeleted = await hasColumn("sales", "is_deleted");
   const hasDeletedAt = await hasColumn("sales", "deleted_at");
@@ -70,6 +73,14 @@ async function queryShiftSalesForWindow(
   const deletedSelect = deletedColumns ? `, ${deletedColumns}` : "";
   const start = shiftWindow.start;
   const endParam = shiftWindow.end ?? null;
+  const safeCashierLookup =
+    typeof cashierLookup === "string" ? cashierLookup.trim() : "";
+  const cashierFilter = safeCashierLookup
+    ? `AND (
+         COALESCE(created_by, '') = $3::text
+         OR COALESCE(server_name, '') = $3::text
+       )`
+    : "";
   const [dailyStats, paymentBreakdown, recentOrders] = await Promise.all([
     pool.query(
       `SELECT
@@ -81,8 +92,9 @@ async function queryShiftSalesForWindow(
        FROM public.sales
        WHERE created_at >= $1::timestamptz
          AND ($2::timestamptz IS NULL OR created_at <= $2::timestamptz)
+         ${cashierFilter}
          ${deletedFilter}`,
-      [start, endParam],
+      [start, endParam, safeCashierLookup],
     ),
     pool.query(
       `SELECT
@@ -93,10 +105,11 @@ async function queryShiftSalesForWindow(
        WHERE created_at >= $1::timestamptz
          AND ($2::timestamptz IS NULL OR created_at <= $2::timestamptz)
          AND COALESCE(status, 'completed') = 'completed'
+         ${cashierFilter}
          ${deletedFilter}
        GROUP BY payment_method
        ORDER BY total DESC`,
-      [start, endParam],
+      [start, endParam, safeCashierLookup],
     ),
     pool.query(
       `SELECT
@@ -111,10 +124,78 @@ async function queryShiftSalesForWindow(
        LEFT JOIN public.shifts sh ON s.shift_id = sh.id
        WHERE s.created_at >= $1::timestamptz
          AND ($2::timestamptz IS NULL OR s.created_at <= $2::timestamptz)
+         ${
+           safeCashierLookup
+             ? `AND (
+         COALESCE(s.created_by, '') = $3::text
+         OR COALESCE(s.server_name, '') = $3::text
+       )`
+             : ""
+         }
          ${deletedFilterS}
        ORDER BY s.created_at DESC
        LIMIT 50`,
-      [start, endParam],
+      [start, endParam, safeCashierLookup],
+    ),
+  ]);
+
+  return {
+    dailyStats: dailyStats.rows[0],
+    paymentBreakdown: paymentBreakdown.rows,
+    recentOrders: recentOrders.rows.map(addOvernightFields),
+  };
+}
+
+async function queryShiftSalesByShiftId(shiftId: number, deleted: boolean) {
+  const hasIsDeleted = await hasColumn("sales", "is_deleted");
+  const hasDeletedAt = await hasColumn("sales", "deleted_at");
+  const hasDeletedBy = await hasColumn("sales", "deleted_by");
+  const deletedFilter = makeDeletedFilter(hasIsDeleted, deleted);
+  const deletedFilterS = makeDeletedFilter(hasIsDeleted, deleted, "s");
+  const deletedColumns = makeDeletedColumns(hasDeletedAt, hasDeletedBy, "s");
+  const deletedSelect = deletedColumns ? `, ${deletedColumns}` : "";
+  const [dailyStats, paymentBreakdown, recentOrders] = await Promise.all([
+    pool.query(
+      `SELECT
+         COUNT(*)::int AS total_orders,
+         COUNT(*) FILTER (WHERE COALESCE(status, 'completed') = 'completed')::int AS completed_orders,
+         COALESCE(SUM(grand_total) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_sales,
+         COALESCE(SUM(subtotal) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_subtotal,
+         COALESCE(SUM(service_charge) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_service_charge
+       FROM public.sales
+       WHERE shift_id = $1::int
+         ${deletedFilter}`,
+      [shiftId],
+    ),
+    pool.query(
+      `SELECT
+         payment_method,
+         COUNT(*)::int AS count,
+         COALESCE(SUM(grand_total), 0)::float AS total
+       FROM public.sales
+       WHERE shift_id = $1::int
+         AND COALESCE(status, 'completed') = 'completed'
+         ${deletedFilter}
+       GROUP BY payment_method
+       ORDER BY total DESC`,
+      [shiftId],
+    ),
+    pool.query(
+      `SELECT
+         s.id, s.order_number, s.items,
+         s.subtotal::float, s.service_charge::float, s.grand_total::float,
+         COALESCE(s.discount_percent, 0)::int AS discount_percent,
+         s.payment_method, s.server_name, s.created_by,
+         COALESCE(s.status, 'completed') AS status,
+         s.void_reason, s.created_at,
+         sh.start_time AS shift_start_time${deletedSelect}
+       FROM public.sales s
+       LEFT JOIN public.shifts sh ON s.shift_id = sh.id
+       WHERE s.shift_id = $1::int
+         ${deletedFilterS}
+       ORDER BY s.created_at DESC
+       LIMIT 50`,
+      [shiftId],
     ),
   ]);
 
@@ -130,6 +211,7 @@ async function getCachedShiftSales(
   deleted: boolean,
   isPermanent: boolean,
   shiftWindow: { start: string; end: string | null },
+  cashierLookup = "",
 ) {
   const cacheKey = getShiftSalesCacheKey(shiftId, deleted);
   const now = Date.now();
@@ -140,7 +222,14 @@ async function getCachedShiftSales(
     return cached.data;
   }
 
-  const data = await queryShiftSalesForWindow(shiftWindow, deleted);
+  const hasShiftIdCol = await hasColumn("sales", "shift_id");
+  let data = hasShiftIdCol
+    ? await queryShiftSalesByShiftId(shiftId, deleted)
+    : await queryShiftSalesForWindow(shiftWindow, deleted, cashierLookup);
+
+  if ((data.dailyStats?.total_orders ?? 0) === 0) {
+    data = await queryShiftSalesForWindow(shiftWindow, deleted, cashierLookup);
+  }
   shiftSalesCache.set(cacheKey, {
     data,
     expiresAt: isPermanent
@@ -385,12 +474,15 @@ export async function GET(request: Request) {
           start: shiftRow.start_time,
           end: shiftRow.end_time ?? null,
         };
+        const cashierLookup =
+          shiftRow.cashier_username ?? shiftRow.cashier_name ?? "";
         const isPermanent = !!shiftRow.end_time;
         const cached = await getCachedShiftSales(
           shiftId,
           deleted,
           isPermanent,
           shiftWindow,
+          cashierLookup,
         );
         dailyStats = { rows: [cached.dailyStats] };
         paymentBreakdown = { rows: cached.paymentBreakdown };
