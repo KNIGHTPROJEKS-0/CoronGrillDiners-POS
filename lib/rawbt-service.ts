@@ -30,15 +30,15 @@ export interface PrinterMapping {
 export const PRINTER_MAPPINGS: Record<PrinterRole, PrinterMapping> = {
   cashier: {
     id: "CASHIER_PRINTER",
-    name: "RPP02N_1",
+    name: "RPP02N",
     mac: "03:02:A6:B9:D3:C0",
-    label: "Cashier Printer",
+    label: "RPP02N",
   },
   kitchen: {
     id: "KITCHEN_PRINTER",
-    name: "RPP02N_2",
+    name: "POS58D",
     mac: "03:3D:5F:3E:AE:84",
-    label: "Kitchen Printer",
+    label: "POS58D",
   },
 };
 
@@ -228,6 +228,9 @@ export async function printRoleRoutingTest(role: PrinterRole): Promise<void> {
   const bytes: number[] = [
     ESC,
     0x40, // ESC @ — INIT
+    ESC,
+    0x74,
+    16, // ESC t 16 — CODE PAGE 1252
     ESC,
     0x61,
     0x01, // ESC a 1 — ALIGN CENTER

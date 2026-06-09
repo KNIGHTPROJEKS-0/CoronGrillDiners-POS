@@ -397,10 +397,10 @@ export default function ReceiptPage() {
           }}
         >
           {cashierDone
-            ? "✅ Receipt Printed"
+            ? "✅ RPP02N Printed"
             : cashierViaRawbt
-              ? "📲 Sent via RawBT"
-              : "🖨 Print Receipt (BLE)"}
+              ? "📲 RPP02N via RawBT"
+              : "🖨 RPP02N"}
         </button>
 
         {hasKitchen && (
@@ -428,26 +428,26 @@ export default function ReceiptPage() {
               cursor: "pointer",
               whiteSpace: "nowrap",
               background: kitchenDone
-                ? "#b45309"
+                ? "#7c3aed"
                 : kitchenViaRawbt
                   ? "#92400e"
-                  : "#d97706",
+                  : "#8b5cf6",
               color: "#fff",
               boxShadow: kitchenDone
-                ? "0 2px 8px rgba(180,83,9,.4)"
+                ? "0 2px 8px rgba(124, 58, 237,.4)"
                 : kitchenViaRawbt
                   ? "0 2px 8px rgba(146,64,14,.4)"
-                  : "0 2px 8px rgba(217,119,6,.4)",
+                  : "0 2px 8px rgba(139, 92, 246,.4)",
               fontSize: 13,
               padding: "10px 16px",
               fontWeight: 700,
             }}
           >
             {kitchenDone
-              ? "✅ Kitchen Printed"
+              ? "✅ POS58D Printed"
               : kitchenViaRawbt
-                ? "📲 Sent via RawBT"
-                : "🍳 Print to Kitchen (BLE)"}
+                ? "📲 POS58D via RawBT"
+                : "🍳 POS58D"}
           </button>
         )}
 
