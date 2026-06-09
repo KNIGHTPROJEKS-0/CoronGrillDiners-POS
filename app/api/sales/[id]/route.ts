@@ -200,16 +200,21 @@ export async function PATCH(
       if (status === "void" && prevStatus === "completed") {
         // Log to void_log if it's an admin void
         if (isAdmin) {
-          await client.query(
-            `INSERT INTO void_log (sale_id, voided_by, voided_by_role, reason)
-             VALUES ($1, $2, $3, $4)`,
-            [
-              id,
-              username,
-              "admin",
-              voidReason
-            ]
-          )
+          try {
+            await client.query(
+              `INSERT INTO void_log (sale_id, voided_by, voided_by_role, reason)
+               VALUES ($1, $2, $3, $4)`,
+              [
+                id,
+                username,
+                "admin",
+                voidReason
+              ]
+            )
+          } catch (e) {
+            console.error("Failed to insert into void_log:", e);
+            // Don't fail the whole transaction if this fails
+          }
         }
         for (const item of saleItems) {
           if (item.id && Number(item.quantity) > 0) {
@@ -270,6 +275,7 @@ export async function PATCH(
 
       return NextResponse.json({ sale })
     } catch (err) {
+      console.error("Transaction error while updating sale:", err)
       await client.query("ROLLBACK")
       throw err
     } finally {
@@ -277,7 +283,8 @@ export async function PATCH(
     }
   } catch (error) {
     console.error("Failed to update sale status:", error)
-    return NextResponse.json({ error: "Failed to update sale status" }, { status: 500 })
+    const message = error instanceof Error ? error.message : "Failed to update sale status"
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
 

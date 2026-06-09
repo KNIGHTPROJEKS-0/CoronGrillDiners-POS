@@ -286,17 +286,22 @@ export async function POST(request: Request) {
     }
 
     // Insert into void_log
-    await client.query(
-      `INSERT INTO void_log (sale_id, voided_by, voided_by_role, void_code_used, reason)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [
-        saleId,
-        actor.username,
-        session.user.role === "admin" ? "admin" : "cashier",
-        normalizedCode,
-        reason
-      ]
-    );
+    try {
+      await client.query(
+        `INSERT INTO void_log (sale_id, voided_by, voided_by_role, void_code_used, reason)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          saleId,
+          actor.username,
+          session.user.role === "admin" ? "admin" : "cashier",
+          normalizedCode,
+          reason
+        ]
+      );
+    } catch (e) {
+      console.error("Failed to insert into void_log (void-code use):", e);
+      // Don't fail if this fails
+    }
 
     // Consume the void code
     const consumeResult = await client.query(
