@@ -129,6 +129,25 @@ export async function PATCH(
     try {
       await client.query("BEGIN")
 
+      // Ensure void_log exists
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS void_log (
+          id SERIAL PRIMARY KEY,
+          sale_id UUID NOT NULL REFERENCES public.sales(id) ON DELETE CASCADE,
+          voided_by VARCHAR(255) NOT NULL,
+          voided_by_role VARCHAR(20) NOT NULL CHECK (voided_by_role IN ('admin', 'cashier')),
+          void_code_used VARCHAR(20),
+          reason TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `);
+
+      // Ensure indexes exist
+      try {
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_void_log_sale_id ON void_log(sale_id)`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_void_log_created_at ON void_log(created_at DESC)`);
+      } catch { /* ignore if indexes already exist */ }
+
       /* Fetch current status + items before updating (needed for stock logic) */
       const saleCheck = await client.query(
         `SELECT status, items, payment_method, grand_total, shift_id

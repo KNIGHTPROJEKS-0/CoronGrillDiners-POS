@@ -604,20 +604,28 @@ function DashboardSection({ data, selectedDate, onRefresh }: { data: SalesData |
   const handleVoid = async (order: ManagedOrder) => {
     if (!voidReason.trim()) return
     setActionBusy(order.id)
-    const res = await fetch(`/api/sales/${order.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "void", voidReason }),
-    })
-    if (res.ok) {
-      const j = await res.json()
-      const stored = j.sale?.void_reason ?? voidReason
-      setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: "void", void_reason: stored } : o))
-      onRefresh().catch(() => {})
+    try {
+      const res = await fetch(`/api/sales/${order.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "void", voidReason }),
+      })
+      if (res.ok) {
+        const j = await res.json()
+        const stored = j.sale?.void_reason ?? voidReason
+        setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: "void", void_reason: stored } : o))
+        onRefresh().catch(() => {})
+      } else {
+        const errJson = await res.json()
+        alert(`Failed to void order: ${errJson.error || "Unknown error"}`)
+      }
+    } catch (error) {
+      alert(`Failed to void order: ${error instanceof Error ? error.message : "Unknown error"}`)
+    } finally {
+      setVoidTarget(null)
+      setVoidReason("")
+      setActionBusy(null)
     }
-    setVoidTarget(null)
-    setVoidReason("")
-    setActionBusy(null)
   }
 
   const handleRestore = async (order: ManagedOrder) => {
