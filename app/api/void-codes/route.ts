@@ -63,6 +63,29 @@ export async function PUT() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    
+    // Create void_log table if it doesn't exist to track all void actions
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS void_log (
+        id SERIAL PRIMARY KEY,
+        sale_id UUID NOT NULL REFERENCES public.sales(id) ON DELETE CASCADE,
+        voided_by VARCHAR(255) NOT NULL,
+        voided_by_role VARCHAR(20) NOT NULL CHECK (voided_by_role IN ('admin', 'cashier')),
+        void_code_used VARCHAR(20),
+        reason TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    
+    // Create indexes for void_log
+    try {
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_void_log_sale_id ON void_log(sale_id)
+      `);
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_void_log_created_at ON void_log(created_at DESC)
+      `);
+    } catch { /* ignore if indexes already exist */ }
 
     // Create indexes if they don't exist
     try {
@@ -262,6 +285,20 @@ export async function POST(request: Request) {
       );
     }
 
+    // Insert into void_log
+    await client.query(
+      `INSERT INTO void_log (sale_id, voided_by, voided_by_role, void_code_used, reason)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        saleId,
+        actor.username,
+        session.user.role === "admin" ? "admin" : "cashier",
+        normalizedCode,
+        reason
+      ]
+    );
+
+    // Consume the void code
     const consumeResult = await client.query(
       `UPDATE void_codes
        SET used_by = $1, used_at = NOW(), sale_id = $2

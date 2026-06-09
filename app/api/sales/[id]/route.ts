@@ -179,6 +179,19 @@ export async function PATCH(
          COMPLETE (from void, admin restore): re-decrement stock
       ──────────────────────────────────────────────────────────────────────── */
       if (status === "void" && prevStatus === "completed") {
+        // Log to void_log if it's an admin void
+        if (isAdmin) {
+          await client.query(
+            `INSERT INTO void_log (sale_id, voided_by, voided_by_role, reason)
+             VALUES ($1, $2, $3, $4)`,
+            [
+              id,
+              username,
+              "admin",
+              voidReason
+            ]
+          )
+        }
         for (const item of saleItems) {
           if (item.id && Number(item.quantity) > 0) {
             await client.query(
