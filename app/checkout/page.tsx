@@ -9,7 +9,6 @@ import {
   ArrowLeft,
   CreditCard,
   Wallet,
-  Printer,
   Loader2,
   ChefHat,
   Receipt,
@@ -21,7 +20,6 @@ import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -40,8 +38,6 @@ import {
   buildCashierReceiptText,
   buildKitchenTicketText,
   getMappedPrinter,
-  printCashierReceipt,
-  printKitchenTicket,
 } from "@/lib/rawbt-service";
 import { usePrinterStatus } from "@/app/hooks/use-printer-status";
 import { useShift } from "@/hooks/use-shift";
@@ -101,7 +97,6 @@ export default function CheckoutPage() {
   const [tableNumber, setTableNumber] = useState("");
   const [amountTendered, setAmountTendered] = useState("");
   const [showSummaryModal, setShowSummaryModal] = useState(false);
-  const [withKitchenTicket, setWithKitchenTicket] = useState(false);
   const [orderNumber] = useState(generateOrderNumber());
   const [dateTime] = useState(formatDateTime());
   const [isBusy, setIsBusy] = useState(false);
@@ -316,80 +311,7 @@ export default function CheckoutPage() {
     }
   };
 
-  const describeError = (error: unknown, fallback: string) => {
-    if (error instanceof Error && error.message.trim()) return error.message;
-    return fallback;
-  };
 
-  const runPrintFlow = async (options: {
-    cashier?: boolean;
-    kitchen?: boolean;
-  }) => {
-    if (options.cashier) {
-      await printCashierReceipt(printData);
-    }
-    if (options.kitchen) {
-      await printKitchenTicket(printData);
-    }
-  };
-
-  const handleQuickPrintCashier = async () => {
-    setIsBusy(true);
-    try {
-      const outcome = await printCashierReceipt(printData);
-      if (outcome === "bluetooth" || outcome === "usb") {
-        toast.success(
-          `Receipt printed — ${cashierStatus.name || cashierMapped.name}`,
-        );
-      } else {
-        toast.info("Sent to RawBT — verify on the cashier printer");
-      }
-    } catch (error) {
-      toast.error("Cashier print failed", {
-        description: describeError(
-          error,
-          "Cashier printer not connected. Open Printer Setup to connect via Bluetooth.",
-        ),
-      });
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  const handleQuickPrintKitchen = async () => {
-    setIsBusy(true);
-    try {
-      const outcome = await printKitchenTicket(printData);
-      if (outcome === "bluetooth" || outcome === "usb") {
-        toast.success(
-          `Kitchen ticket printed — ${kitchenStatus.name || kitchenMapped.name}`,
-        );
-      } else {
-        toast.info("Sent to RawBT — verify on the kitchen printer");
-      }
-    } catch (error) {
-      toast.error("Kitchen print failed", {
-        description: describeError(
-          error,
-          "Kitchen printer not connected. Open Printer Setup to connect via Bluetooth.",
-        ),
-      });
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  // ── Option 2: Print Only (no DB record) ─────────────────────────────────────
-  // Stores receipt data and navigates to the /receipt page where the cashier
-  // sees both previews and can trigger / retry printing from there.
-  const handlePrintOnly = () => {
-    storeReceiptData(printData, isAdmin ? "/pos" : "/", withKitchenTicket);
-    setShowSummaryModal(false);
-    completingRef.current = true;
-    invalidateSnapshot();
-    clearCart();
-    router.push("/receipt");
-  };
 
   // ── Option 3: Print + Save ──────────────────────────────────────────────────
   // Saves to DB then stores receipt data and navigates to the /receipt page.
@@ -402,7 +324,7 @@ export default function CheckoutPage() {
         return;
       }
 
-      storeReceiptData(printData, isAdmin ? "/pos" : "/", withKitchenTicket);
+      storeReceiptData(printData, isAdmin ? "/pos" : "/", true);
       setShowSummaryModal(false);
       completingRef.current = true;
       invalidateSnapshot();
@@ -724,51 +646,11 @@ export default function CheckoutPage() {
             )}
           </div>
 
-          {/* Kitchen ticket toggle */}
-          <div className="flex items-center gap-2 px-0.5">
-            <Checkbox
-              id="kitchenTicket"
-              checked={withKitchenTicket}
-              onCheckedChange={(v) => setWithKitchenTicket(v as boolean)}
-              disabled={isBusy}
-            />
-            <Label
-              htmlFor="kitchenTicket"
-              className="text-sm cursor-pointer flex items-center gap-1.5"
-            >
-              <ChefHat className="h-3.5 w-3.5 text-orange-600" />
-              Also print kitchen ticket
-            </Label>
-          </div>
-
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="gap-2"
-              onClick={handleQuickPrintCashier}
-              disabled={isBusy || !isModalReady}
-            >
-              <Receipt className="h-4 w-4" />
-              Print Receipt
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="gap-2"
-              onClick={handleQuickPrintKitchen}
-              disabled={isBusy || !isModalReady}
-            >
-              <ChefHat className="h-4 w-4" />
-              Send to Kitchen
-            </Button>
-          </div>
-
           <Separator />
 
-          {/* ── 3 Action Options ─────────────────────────────────────────────── */}
+          {/* ── 2 Action Options ─────────────────────────────────────────────── */}
           <div className="space-y-2">
-            {/* Option 3 (primary): Print assigned receipts + save */}
+            {/* Option 1 (primary): Print */}
             <Button
               className="w-full gap-2 h-11"
               onClick={handlePrintAndSave}
@@ -779,24 +661,10 @@ export default function CheckoutPage() {
               ) : (
                 <PrinterCheck className="h-4 w-4" />
               )}
-              Print Assigned Receipts + Save to Records
+              Print
             </Button>
 
-            {/* Option 2: Print assigned receipts only (no save) */}
-            <Button
-              variant="outline"
-              className="w-full gap-2 h-11"
-              onClick={handlePrintOnly}
-              disabled={isBusy || !isModalReady}
-            >
-              <Printer className="h-4 w-4" />
-              Print Assigned Receipts Only
-              <span className="text-xs text-muted-foreground font-normal ml-1">
-                (no database record)
-              </span>
-            </Button>
-
-            {/* Option 1: Save Only (no print) */}
+            {/* Option 2: Save Only */}
             <Button
               variant="ghost"
               className="w-full gap-2 h-10 text-muted-foreground hover:text-foreground"
@@ -804,8 +672,7 @@ export default function CheckoutPage() {
               disabled={isBusy || !isModalReady}
             >
               <Save className="h-4 w-4" />
-              Save Record Only
-              <span className="text-xs font-normal ml-1">(no print)</span>
+              Save
             </Button>
 
             <Separator />
