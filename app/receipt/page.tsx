@@ -16,7 +16,7 @@ import {
 const STORAGE_KEY = "cgd_active_receipt";
 const MAX_AGE_MS = 10 * 60 * 1000;
 
-type Selection = "cashier" | "kitchen";
+type Selection = "cashier" | "kitchen" | "both";
 
 interface ReceiptEntry {
   receiptText: string;
@@ -26,6 +26,66 @@ interface ReceiptEntry {
   printDataJson: string;
   returnPath: string;
   ts: number;
+}
+
+// Print selected receipts via Chrome Print Preview (like shift summary)
+function printThermalReceipt(
+  selected: Selection,
+  receiptText: string,
+  kitchenText?: string,
+  orderNumber?: string
+) {
+  const W = 32;
+  const receiptTitle = orderNumber ? `Receipt ${orderNumber}` : "Receipt";
+
+  let content = "";
+  if (selected === "cashier" || selected === "both") {
+    content += receiptText + "\n\n\n";
+  }
+  if ((selected === "kitchen" || selected === "both") && kitchenText) {
+    content += kitchenText;
+  }
+
+  const w = window.open("", "_blank", "width=420,height=700");
+  if (!w) {
+    alert("Allow pop-ups to print the receipt.");
+    return;
+  }
+
+  w.document.write(`<!DOCTYPE html><html><head>
+    <meta charset="utf-8">
+    <title>${receiptTitle}</title>
+    <style>
+      @page { size: 58mm auto; margin: 0; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { background: #f5f5f5; font-family: sans-serif; }
+      .wrap { display: flex; flex-direction: column; align-items: center; padding: 12px; min-height: 100vh; }
+      .toolbar { display: flex; gap: 8px; margin-bottom: 14px; width: 100%; max-width: 320px; }
+      .btn { flex: 1; padding: 10px 0; border: none; border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: sans-serif; }
+      .btn-print { background: #111827; color: #fff; }
+      .btn-close  { background: #e5e7eb; color: #374151; }
+      .receipt { background: #fff; border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,.15); padding: 12px 10px; width: 300px; }
+      pre { font-family: 'Courier New', Courier, monospace; font-size: 10.5px; line-height: 1.45; color: #111; white-space: pre; }
+      @media print {
+        @page { size: 58mm auto; margin: 0; }
+        body { background: #fff; }
+        .wrap { padding: 0; align-items: flex-start; }
+        .toolbar { display: none !important; }
+        .receipt { box-shadow: none; border-radius: 0; width: 58mm; padding: 2mm; }
+        pre { font-size: 9pt; line-height: 1.35; }
+      }
+    </style>
+  </head><body>
+    <div class="wrap">
+      <div class="toolbar">
+        <button class="btn btn-print" onclick="window.print()">🖨 Print Receipt</button>
+        <button class="btn btn-close" onclick="window.close()">✕ Close</button>
+      </div>
+      <div class="receipt"><pre>${content.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</pre></div>
+    </div>
+  </body></html>`);
+  w.document.close();
+  w.focus();
 }
 
 export default function ReceiptPage() {
@@ -50,6 +110,10 @@ export default function ReceiptPage() {
 
       localStorage.removeItem(STORAGE_KEY);
       setEntry(parsed);
+      // Set default selection to "both" if there's a kitchen receipt
+      if (parsed.kitchenText) {
+        setSelected("both");
+      }
     } catch {
       // Ignore malformed storage.
     }
@@ -198,10 +262,20 @@ export default function ReceiptPage() {
       return;
     }
 
+    if (selected === "kitchen") {
+      const data = getPrintData();
+      const kitchenText =
+        entry.kitchenText ?? (data ? buildKitchenTicketText(data) : "");
+      shareTxt(kitchenText, `kitchen-${sanitize(entry.orderNumber)}.txt`);
+      return;
+    }
+
+    // Save both
     const data = getPrintData();
     const kitchenText =
       entry.kitchenText ?? (data ? buildKitchenTicketText(data) : "");
-    shareTxt(kitchenText, `kitchen-${sanitize(entry.orderNumber)}.txt`);
+    const bothText = `${entry.receiptText}\n\n\n${kitchenText}`;
+    shareTxt(bothText, `both-${sanitize(entry.orderNumber)}.txt`);
   }
 
   function doBackToPOS() {
@@ -242,6 +316,7 @@ export default function ReceiptPage() {
 
   const cashierSelected = selected === "cashier";
   const kitchenSelected = selected === "kitchen";
+  const bothSelected = selected === "both";
 
   return (
     <>
@@ -262,6 +337,25 @@ export default function ReceiptPage() {
         <span style={{ color: "#9ca3af", fontSize: 11, flex: 1, minWidth: 80 }}>
           Order {entry.orderNumber}
         </span>
+
+        {/* Universal Chrome Print Preview Button */}
+        <button
+          onClick={() => printThermalReceipt(selected, entry.receiptText, entry.kitchenText, entry.orderNumber)}
+          style={{
+            border: "none",
+            borderRadius: 6,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            background: "#1d4ed8",
+            color: "#fff",
+            boxShadow: "0 2px 8px rgba(30, 64, 175, .4)",
+            fontSize: 13,
+            padding: "10px 16px",
+            fontWeight: 700,
+          }}
+        >
+          🖨 Print Preview
+        </button>
 
         <button
           onClick={async () => {
@@ -306,7 +400,7 @@ export default function ReceiptPage() {
             ? "✅ Receipt Printed"
             : cashierViaRawbt
               ? "📲 Sent via RawBT"
-              : "🖨 Print Receipt"}
+              : "🖨 Print Receipt (BLE)"}
         </button>
 
         {hasKitchen && (
@@ -353,7 +447,7 @@ export default function ReceiptPage() {
               ? "✅ Kitchen Printed"
               : kitchenViaRawbt
                 ? "📲 Sent via RawBT"
-                : "🍳 Print to Kitchen"}
+                : "🍳 Print to Kitchen (BLE)"}
           </button>
         )}
 
@@ -376,7 +470,7 @@ export default function ReceiptPage() {
 
         <button
           onClick={doSaveTxt}
-          title={`Save ${selected === "cashier" ? "cashier receipt" : "kitchen ticket"} as .txt`}
+          title={`Save ${selected === "cashier" ? "cashier receipt" : selected === "kitchen" ? "kitchen ticket" : "both receipts"} as .txt`}
           style={{
             border: "1.5px solid rgba(255,255,255,.2)",
             borderRadius: 6,
@@ -389,7 +483,7 @@ export default function ReceiptPage() {
             color: "#e5e7eb",
           }}
         >
-          💾 Save {selected === "cashier" ? "Cashier" : "Kitchen"} .txt
+          💾 Save {selected === "cashier" ? "Cashier" : selected === "kitchen" ? "Kitchen" : "Both"} .txt
         </button>
 
         <button
@@ -654,6 +748,58 @@ export default function ReceiptPage() {
               }}
             >
               {entry.kitchenText}
+            </pre>
+          </div>
+        )}
+
+        {hasKitchen && (
+          <div
+            onClick={() => setSelected("both")}
+            style={{
+              ...cardBase,
+              outline: bothSelected
+                ? "3px solid #1d4ed8"
+                : "2px solid rgba(0,0,0,.08)",
+              boxShadow: bothSelected
+                ? "0 0 0 4px rgba(37, 99, 235,.18), 0 4px 16px rgba(0,0,0,.18)"
+                : "0 4px 16px rgba(0,0,0,.18)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                marginBottom: 10,
+                padding: "6px 8px",
+                borderRadius: 6,
+                background: bothSelected ? "#dbeafe" : "#f1f5f9",
+              }}
+            >
+              <span style={{ fontSize: 16 }}>📋</span>
+              <span
+                style={{
+                  fontFamily: "sans-serif",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  color: bothSelected ? "#1e40af" : "#475569",
+                }}
+              >
+                Both Receipts
+              </span>
+            </div>
+
+            <pre
+              style={{
+                fontFamily: "'Courier New', Courier, monospace",
+                fontSize: "10px",
+                lineHeight: 1.45,
+                color: "#111",
+                margin: 0,
+                whiteSpace: "pre",
+              }}
+            >
+              {`${entry.receiptText}\n\n---\n\n${entry.kitchenText}`}
             </pre>
           </div>
         )}
