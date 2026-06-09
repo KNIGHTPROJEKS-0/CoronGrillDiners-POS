@@ -1,355 +1,388 @@
-"use client"
+"use client";
 
-import { useState, useEffect } from "react"
+import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
-  Usb, Bluetooth, Wifi, WifiOff, Printer, CheckCircle,
-  AlertCircle, Loader2, X, ExternalLink,
-} from "lucide-react"
+  Activity,
+  Bluetooth,
+  ChefHat,
+  Loader2,
+  Printer,
+  Receipt,
+  Route,
+} from "lucide-react";
 import {
+  RAWBT_CODEPAGE,
+  RAWBT_LOCAL_SERVICE_ORIGIN,
+  RAWBT_LOCAL_SERVICE_URL,
+  checkRawBTServiceConnection,
+  getMappedPrinter,
+  printRoleDemoLayout,
+  printRoleRoutingTest,
+  type RawBTServiceHealth,
   type PrinterRole,
-  connectUSB,
-  connectBluetooth,
-  disconnectPrinter,
-  printTo,
-  isInsideIframe,
-  PRINTER_NAMES,
-  PRINTER_MACS,
-  saveRawBTPrinter,
-  loadRawBTPrinter,
-  clearRawBTPrinter,
-  printToRawBT,
-} from "@/lib/printer-connection"
-import { usePrinterStatus } from "@/app/hooks/use-printer-status"
-import { buildCustomerReceipt, buildKitchenTicket, type PrintData } from "@/lib/escpos"
-
-const TEST_DATA: PrintData = {
-  orderNumber: "#CGD-TEST",
-  dateTime: new Date().toLocaleString("en-PH"),
-  serverName: "Test",
-  tableNumber: "Table 5",
-  paymentMethod: "cash",
-  items: [
-    { id: 1, name: "Test Item A", price: 100, quantity: 2 },
-    { id: 2, name: "Test Item B", price: 75, quantity: 1 },
-  ],
-  subtotal: 275,
-  discountPercent: 0,
-  discountAmount: 0,
-  grandTotal: 275,
-  amountTendered: 300,
-  change: 25,
-}
-
-interface PrinterSlotProps {
-  role: PrinterRole
-  label: string
-  description: string
-  disabled?: boolean
-}
-
-function PrinterSlot({ role, label, description, disabled }: PrinterSlotProps) {
-  const st = usePrinterStatus(role)
-  const [busy, setBusy] = useState<string | null>(null)
-  const [error, setError] = useState("")
-  const [testOk, setTestOk] = useState(false)
-  const [rawbtName, setRawbtName] = useState("")
-  const [showRawbtInput, setShowRawbtInput] = useState(false)
-
-  useEffect(() => {
-    const saved = loadRawBTPrinter(role)
-    if (saved) setRawbtName(saved)
-  }, [role])
-
-  const saveRawbtName = () => {
-    if (rawbtName.trim()) {
-      saveRawBTPrinter(role, rawbtName.trim())
-      setShowRawbtInput(false)
-    }
-  }
-
-  const clearRawbtName = () => {
-    clearRawBTPrinter(role)
-    setRawbtName("")
-  }
-
-  const run = async (fn: () => Promise<void>, action: string) => {
-    setBusy(action)
-    setError("")
-    setTestOk(false)
-    try {
-      await fn()
-    } catch (e: any) {
-      setError(e?.message ?? "Failed")
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const testPrint = async () => {
-    const data = role === "cashier"
-      ? buildCustomerReceipt(TEST_DATA)
-      : buildKitchenTicket(TEST_DATA)
-    // Try RawBT first if configured
-    if (rawbtName) {
-      const result = await printToRawBT(role, data)
-      if (result) {
-        setTestOk(true)
-        return
-      }
-    }
-    // Fall back to USB/Bluetooth
-    const result = await printTo(role, data)
-    if (result === "none") setError("No printer connected. Connect USB/Bluetooth or configure RawBT first.")
-    else setTestOk(true)
-  }
-
-  return (
-    <div className={`rounded-xl border bg-white p-4 space-y-3 ${disabled ? "opacity-60 pointer-events-none" : ""}`}>
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <Printer className="h-4 w-4 text-primary" />
-            <span className="font-semibold text-sm">{label}</span>
-            {st.connected ? (
-              <Badge className="bg-green-100 text-green-700 border-0 text-xs">Connected</Badge>
-            ) : (
-              <Badge className="bg-gray-100 text-gray-500 border-0 text-xs">Not connected</Badge>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
-        </div>
-        {st.connected && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-gray-400 hover:text-red-600 flex-shrink-0"
-            onClick={() => run(() => disconnectPrinter(role), "disconnect")}
-            disabled={!!busy}
-            title="Disconnect"
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        )}
-      </div>
-
-      {/* Target device info — always shown so cashier knows what to look for */}
-      <div className="flex items-center gap-2 text-xs text-muted-foreground bg-gray-50 rounded-lg px-3 py-2">
-        <Bluetooth className="h-3.5 w-3.5 flex-shrink-0 text-blue-400" />
-        <span className="font-mono font-semibold text-gray-700">{PRINTER_NAMES[role]}</span>
-        <span className="text-gray-400 font-mono">{PRINTER_MACS[role]}</span>
-        {st.connected ? (
-          <Wifi className="h-3.5 w-3.5 text-green-500 flex-shrink-0 ml-auto" />
-        ) : (
-          <WifiOff className="h-3.5 w-3.5 text-gray-400 flex-shrink-0 ml-auto" />
-        )}
-      </div>
-
-      {/* Active connection name (if different from target, e.g. USB) */}
-      {st.name && st.name !== PRINTER_NAMES[role] && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-blue-50 rounded-lg px-3 py-2">
-          {st.type === "usb" ? <Usb className="h-3.5 w-3.5 flex-shrink-0" /> : <Bluetooth className="h-3.5 w-3.5 flex-shrink-0" />}
-          <span className="truncate">Connected: {st.name}</span>
-        </div>
-      )}
-
-      {/* Error / success */}
-      {error && (
-        <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">
-          <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
-      {testOk && (
-        <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2">
-          <CheckCircle className="h-3.5 w-3.5 flex-shrink-0" />
-          Test print sent successfully.
-        </div>
-      )}
-
-      {/* Connect buttons */}
-      {!st.connected && (
-        <>
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 text-xs"
-              onClick={() => run(() => connectUSB(role), "usb")}
-              disabled={!!busy || disabled}
-            >
-              {busy === "usb" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Usb className="h-3.5 w-3.5" />}
-              USB
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 text-xs"
-              onClick={() => run(() => connectBluetooth(role), "bt")}
-              disabled={!!busy || disabled}
-            >
-              {busy === "bt" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bluetooth className="h-3.5 w-3.5" />}
-              Bluetooth
-            </Button>
-          </div>
-
-          {/* RawBT Configuration */}
-          <div className="border-t pt-3 mt-2">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-gray-700">RawBT (Android)</span>
-              {rawbtName ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 text-xs text-red-600 hover:text-red-700"
-                  onClick={clearRawbtName}
-                >
-                  Clear
-                </Button>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 text-xs"
-                  onClick={() => setShowRawbtInput(!showRawbtInput)}
-                >
-                  {showRawbtInput ? "Cancel" : "Configure"}
-                </Button>
-              )}
-            </div>
-            {rawbtName ? (
-              <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2">
-                <CheckCircle className="h-3.5 w-3.5 flex-shrink-0" />
-                <span className="font-mono">{rawbtName}</span>
-              </div>
-            ) : showRawbtInput ? (
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Enter printer name"
-                  value={rawbtName}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRawbtName(e.target.value)}
-                  className="text-xs h-8"
-                />
-                <Button
-                  size="sm"
-                  className="h-8 text-xs"
-                  onClick={saveRawbtName}
-                  disabled={!rawbtName.trim()}
-                >
-                  Save
-                </Button>
-              </div>
-            ) : (
-              <p className="text-xs text-gray-500">
-                Configure RawBT printer name for Android devices
-              </p>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* Test print */}
-      {st.connected && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full gap-1.5 text-xs"
-          onClick={() => run(testPrint, "test")}
-          disabled={!!busy}
-        >
-          {busy === "test" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
-          Print Test Page
-        </Button>
-      )}
-    </div>
-  )
-}
+} from "@/lib/rawbt-service";
 
 interface PrinterSetupDialogProps {
-  open: boolean
-  onOpenChange: (v: boolean) => void
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
 }
 
-export default function PrinterSetupDialog({ open, onOpenChange }: PrinterSetupDialogProps) {
-  const [inIframe, setInIframe] = useState(false)
-  const [appUrl, setAppUrl] = useState("")
+function formatCheckedAt(checkedAt: number) {
+  return new Date(checkedAt).toLocaleTimeString("en-PH", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+}
+
+function StatusDot({ live }: { live: boolean }) {
+  return (
+    <span
+      className={`inline-block h-2.5 w-2.5 rounded-full ${
+        live ? "bg-emerald-500" : "bg-red-500"
+      }`}
+      aria-hidden="true"
+    />
+  );
+}
+
+function PrinterCard({
+  role,
+  icon,
+  title,
+}: {
+  role: PrinterRole;
+  icon: React.ReactNode;
+  title: string;
+}) {
+  const printer = getMappedPrinter(role);
+  const [busyAction, setBusyAction] = useState<
+    "connection" | "routing" | "demo" | null
+  >(null);
+  const [health, setHealth] = useState<RawBTServiceHealth | null>(null);
+
+  const runConnectionCheck = async () => {
+    setBusyAction("connection");
+    try {
+      const result = await checkRawBTServiceConnection();
+      setHealth(result);
+
+      if (result.reachable) {
+        toast.success(`${title}: RawBT service reachable`, {
+          description: result.detail,
+        });
+      } else {
+        toast.error(`${title}: RawBT service unreachable`, {
+          description: result.detail,
+        });
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const runRoutingTest = async () => {
+    setBusyAction("routing");
+    try {
+      await printRoleRoutingTest(role);
+      toast.success(`${title}: routing test sent`, {
+        description: `${printer.mac} via ${RAWBT_LOCAL_SERVICE_URL}`,
+      });
+    } catch (error) {
+      toast.error(`${title}: routing test failed`, {
+        description:
+          error instanceof Error
+            ? error.message
+            : `Could not reach ${RAWBT_LOCAL_SERVICE_URL}`,
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const runDemoLayout = async () => {
+    setBusyAction("demo");
+    try {
+      await printRoleDemoLayout(role);
+      toast.success(`${title}: demo layout sent`, {
+        description: `Full ${role} layout sent to ${printer.name}`,
+      });
+    } catch (error) {
+      toast.error(`${title}: demo layout failed`, {
+        description:
+          error instanceof Error
+            ? error.message
+            : `Could not reach ${RAWBT_LOCAL_SERVICE_URL}`,
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border bg-white p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            {icon}
+            <span className="font-semibold text-sm">{title}</span>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Fixed RawBT routing by mapped MAC address.
+          </p>
+        </div>
+        <Badge variant="secondary">Mapped</Badge>
+      </div>
+
+      <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs space-y-1">
+        <div className="flex items-center gap-2 text-slate-700">
+          <Bluetooth className="h-3.5 w-3.5 text-blue-500" />
+          <span className="font-mono font-semibold">{printer.name}</span>
+        </div>
+        <div>
+          <span className="text-muted-foreground">ID:</span>{" "}
+          <span className="font-mono">{printer.id}</span>
+        </div>
+        <div>
+          <span className="text-muted-foreground">MAC:</span>{" "}
+          <span className="font-mono">{printer.mac}</span>
+        </div>
+      </div>
+
+      <div
+        className={`rounded-lg border px-3 py-2 text-xs ${
+          !health
+            ? "border-slate-200 bg-slate-50 text-slate-600"
+            : health.reachable
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "border-red-200 bg-red-50 text-red-800"
+        }`}
+      >
+        <div className="font-semibold">
+          {health
+            ? health.reachable
+              ? "Service Reachable"
+              : "Service Unreachable"
+            : "Service status not checked yet"}
+        </div>
+        <div className="mt-1">
+          {health
+            ? health.detail
+            : `Use Check Connection to probe ${RAWBT_LOCAL_SERVICE_ORIGIN}`}
+        </div>
+        {health && (
+          <div className="mt-1 text-[11px] opacity-80">
+            Last checked: {formatCheckedAt(health.checkedAt)}
+          </div>
+        )}
+      </div>
+
+      <div className="grid gap-2">
+        <Button
+          className="w-full gap-2"
+          variant="outline"
+          onClick={runConnectionCheck}
+          disabled={!!busyAction}
+        >
+          {busyAction === "connection" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Activity className="h-4 w-4" />
+          )}
+          Check Connection
+        </Button>
+
+        <Button
+          className="w-full gap-2"
+          variant="outline"
+          onClick={runRoutingTest}
+          disabled={!!busyAction}
+        >
+          {busyAction === "routing" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Route className="h-4 w-4" />
+          )}
+          Test Routing
+        </Button>
+
+        <Button
+          className="w-full gap-2"
+          variant="outline"
+          onClick={runDemoLayout}
+          disabled={!!busyAction}
+        >
+          {busyAction === "demo" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Printer className="h-4 w-4" />
+          )}
+          Print Demo Layout
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export default function PrinterSetupDialog({
+  open,
+  onOpenChange,
+}: PrinterSetupDialogProps) {
+  const [serviceHealth, setServiceHealth] = useState<RawBTServiceHealth | null>(
+    null,
+  );
+  const [checkingService, setCheckingService] = useState(false);
+
+  const runGlobalConnectionCheck = useCallback(async () => {
+    setCheckingService(true);
+    try {
+      const result = await checkRawBTServiceConnection();
+      setServiceHealth((previous) => {
+        if (previous?.reachable !== false && result.reachable === false) {
+          toast.error(
+            "Printer Service Disconnected. Please tap the RawBT app to wake it up.",
+          );
+        }
+        return result;
+      });
+      return result;
+    } finally {
+      setCheckingService(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      setInIframe(isInsideIframe())
-      setAppUrl(window.location.href)
+    if (!open) {
+      setServiceHealth(null);
+      return;
     }
-  }, [])
 
-  const openInNewTab = () => {
-    window.open(appUrl || window.location.href, "_blank", "noopener,noreferrer")
-  }
+    runGlobalConnectionCheck().catch(() => {});
+    const interval = setInterval(() => {
+      runGlobalConnectionCheck().catch(() => {});
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [open, runGlobalConnectionCheck]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Printer className="h-4 w-4" />
-            Printer Setup — XPrinter POS58D / XP-58H (58mm)
+            Printer Setup — RawBT Silent Print Service
           </DialogTitle>
         </DialogHeader>
 
-        {/* Iframe warning banner */}
-        {inIframe && (
-          <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs text-blue-800 space-y-2">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="font-semibold text-blue-900">Open in a new tab to connect printers</p>
-                <p className="mt-0.5 text-blue-700">
-                  USB and Bluetooth access is blocked when the app runs inside an embedded preview pane.
-                  Open the app directly in your browser to use printer setup.
-                </p>
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 space-y-1">
+          <p className="font-semibold">
+            No manual Bluetooth or USB selection is required.
+          </p>
+          <p>
+            The POS posts jobs directly to
+            <span className="font-mono"> {RAWBT_LOCAL_SERVICE_URL}</span>,
+            routes by
+            <span className="font-mono"> bt_address</span>, and declares
+            <span className="font-mono"> {RAWBT_CODEPAGE}</span> in the job
+            payload.
+          </p>
+          <p>
+            Each printer card now separates <strong>Check Connection</strong>,{" "}
+            <strong>Test Routing</strong>, and
+            <strong> Print Demo Layout</strong> so staff can avoid confusing a
+            live route test with a full receipt.
+          </p>
+        </div>
+
+        <div className="rounded-lg border bg-slate-50 p-3 text-xs space-y-2">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="font-semibold text-slate-900">
+                RawBT Service Reachability
+              </div>
+              <div className="text-slate-600 mt-0.5">
+                {serviceHealth
+                  ? serviceHealth.detail
+                  : `Checking whether ${RAWBT_LOCAL_SERVICE_ORIGIN} is reachable from Chrome.`}
               </div>
             </div>
-            <Button
-              size="sm"
-              className="w-full gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-              onClick={openInNewTab}
+            <Badge
+              variant="secondary"
+              className={
+                serviceHealth
+                  ? serviceHealth.reachable
+                    ? "bg-emerald-100 text-emerald-800 gap-2"
+                    : "bg-red-100 text-red-800 gap-2"
+                  : "gap-2"
+              }
             >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Open App in New Tab
-            </Button>
+              <StatusDot live={serviceHealth?.reachable ?? false} />
+              {checkingService
+                ? "Checking…"
+                : serviceHealth
+                  ? serviceHealth.reachable
+                    ? "Live"
+                    : "Disconnected"
+                  : "Unknown"}
+            </Badge>
           </div>
-        )}
 
-        <div className="space-y-3 mt-1">
-          <PrinterSlot
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            onClick={runGlobalConnectionCheck}
+            disabled={checkingService}
+          >
+            {checkingService ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Activity className="h-4 w-4" />
+            )}
+            Check RawBT Service
+          </Button>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <PrinterCard
             role="cashier"
-            label="Cashier Printer"
-            description="Prints customer receipts at the counter"
-            disabled={inIframe}
+            title="Cashier Printer"
+            icon={<Receipt className="h-4 w-4 text-green-600" />}
           />
-          <PrinterSlot
+          <PrinterCard
             role="kitchen"
-            label="Kitchen Printer"
-            description="Prints order tickets in the kitchen"
-            disabled={inIframe}
+            title="Kitchen Printer"
+            icon={<ChefHat className="h-4 w-4 text-orange-600" />}
           />
         </div>
 
-        <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 space-y-1">
-          <p className="font-semibold">Setup tips:</p>
-          <p>• <strong>Cashier printer:</strong> <span className="font-mono">RPP02N</span> — connects via Bluetooth.</p>
-          <p>• <strong>Kitchen printer:</strong> <span className="font-mono">POS58D</span> — connects via Bluetooth.</p>
-          <p>• <strong>Bluetooth:</strong> Pair the printer in your phone/PC Bluetooth settings first. Then click &quot;Bluetooth&quot; here — the picker will show only the correct device. If asked, confirm the pairing code on both devices.</p>
-          <p>• <strong>USB:</strong> Connect the USB cable, click &quot;USB&quot;, then pick the printer port from the browser dialog.</p>
-          <p>• Once connected, the app remembers and auto-reconnects on your next visit (no dialog needed).</p>
-          <p>• Use <strong>Chrome</strong> on Android or desktop for best compatibility (HTTPS required).</p>
+        <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-700 space-y-1">
+          <p className="font-semibold text-slate-900">Operational notes</p>
+          <p>
+            • Connection checks only verify that the RawBT local service is
+            reachable.
+          </p>
+          <p>
+            • Routing tests print a tiny unmistakable marker to the assigned
+            printer.
+          </p>
+          <p>
+            • Demo layout prints the full sample receipt/ticket format for
+            visual QA.
+          </p>
         </div>
       </DialogContent>
     </Dialog>
-  )
+  );
 }
