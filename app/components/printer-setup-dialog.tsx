@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -11,49 +11,30 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Activity,
   Bluetooth,
   ChefHat,
   Loader2,
   Printer,
   Receipt,
   Route,
+  Unplug,
 } from "lucide-react";
 import {
-  RAWBT_CODEPAGE,
-  RAWBT_LOCAL_SERVICE_ORIGIN,
-  RAWBT_LOCAL_SERVICE_URL,
-  checkRawBTServiceConnection,
+  connectBluetooth,
+  disconnectPrinter,
+  PRINTER_NAMES,
+} from "@/lib/printer-connection";
+import { usePrinterStatus } from "@/app/hooks/use-printer-status";
+import {
   getMappedPrinter,
   printRoleDemoLayout,
   printRoleRoutingTest,
-  type RawBTServiceHealth,
   type PrinterRole,
 } from "@/lib/rawbt-service";
 
 interface PrinterSetupDialogProps {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-}
-
-function formatCheckedAt(checkedAt: number) {
-  return new Date(checkedAt).toLocaleTimeString("en-PH", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-}
-
-function StatusDot({ live }: { live: boolean }) {
-  return (
-    <span
-      className={`inline-block h-2.5 w-2.5 rounded-full ${
-        live ? "bg-emerald-500" : "bg-red-500"
-      }`}
-      aria-hidden="true"
-    />
-  );
 }
 
 function PrinterCard({
@@ -65,72 +46,59 @@ function PrinterCard({
   icon: React.ReactNode;
   title: string;
 }) {
+  const status = usePrinterStatus(role);
   const printer = getMappedPrinter(role);
-  const [busyAction, setBusyAction] = useState<
-    "connection" | "routing" | "demo" | null
-  >(null);
-  const [health, setHealth] = useState<RawBTServiceHealth | null>(null);
 
-  const runConnectionCheck = async () => {
-    setBusyAction("connection");
+  type Action = "connect" | "disconnect" | "routing" | "demo";
+  const [busy, setBusy] = useState<Action | null>(null);
+
+  const run = async (action: Action, fn: () => Promise<void>) => {
+    setBusy(action);
     try {
-      const result = await checkRawBTServiceConnection();
-      setHealth(result);
-
-      if (result.reachable) {
-        toast.success(`${title}: RawBT service reachable`, {
-          description: result.detail,
-        });
-      } else {
-        toast.error(`${title}: RawBT service unreachable`, {
-          description: result.detail,
-        });
-      }
+      await fn();
+    } catch (error) {
+      toast.error(`${title}: ${action} failed`, {
+        description:
+          error instanceof Error
+            ? error.message
+            : "An unexpected error occurred.",
+      });
     } finally {
-      setBusyAction(null);
+      setBusy(null);
     }
   };
 
-  const runRoutingTest = async () => {
-    setBusyAction("routing");
-    try {
+  const handleConnect = () =>
+    run("connect", async () => {
+      await connectBluetooth(role);
+      toast.success(`${title} connected`, {
+        description: status.name || PRINTER_NAMES[role],
+      });
+    });
+
+  const handleDisconnect = () =>
+    run("disconnect", async () => {
+      await disconnectPrinter(role);
+      toast.info(`${title} disconnected`);
+    });
+
+  const handleRoutingTest = () =>
+    run("routing", async () => {
       await printRoleRoutingTest(role);
       toast.success(`${title}: routing test sent`, {
-        description: `${printer.mac} via ${RAWBT_LOCAL_SERVICE_URL}`,
+        description: "Check the printer for *** ROUTING TEST OK ***",
       });
-    } catch (error) {
-      toast.error(`${title}: routing test failed`, {
-        description:
-          error instanceof Error
-            ? error.message
-            : `Could not reach ${RAWBT_LOCAL_SERVICE_URL}`,
-      });
-    } finally {
-      setBusyAction(null);
-    }
-  };
+    });
 
-  const runDemoLayout = async () => {
-    setBusyAction("demo");
-    try {
+  const handleDemoLayout = () =>
+    run("demo", async () => {
       await printRoleDemoLayout(role);
-      toast.success(`${title}: demo layout sent`, {
-        description: `Full ${role} layout sent to ${printer.name}`,
-      });
-    } catch (error) {
-      toast.error(`${title}: demo layout failed`, {
-        description:
-          error instanceof Error
-            ? error.message
-            : `Could not reach ${RAWBT_LOCAL_SERVICE_URL}`,
-      });
-    } finally {
-      setBusyAction(null);
-    }
-  };
+      toast.success(`${title}: demo layout sent`);
+    });
 
   return (
     <div className="rounded-xl border bg-white p-4 space-y-3">
+      {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
@@ -138,98 +106,115 @@ function PrinterCard({
             <span className="font-semibold text-sm">{title}</span>
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            Fixed RawBT routing by mapped MAC address.
+            Web Bluetooth — direct BLE connection
           </p>
         </div>
-        <Badge variant="secondary">Mapped</Badge>
+        <Badge
+          variant="secondary"
+          className={
+            status.connected
+              ? "bg-emerald-100 text-emerald-800 gap-1.5"
+              : "bg-slate-100 text-slate-600 gap-1.5"
+          }
+        >
+          <span
+            className={`inline-block h-2 w-2 rounded-full ${
+              status.connected ? "bg-emerald-500" : "bg-slate-400"
+            }`}
+          />
+          {status.connected ? "Connected" : "Not connected"}
+        </Badge>
       </div>
 
+      {/* Printer identity */}
       <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs space-y-1">
         <div className="flex items-center gap-2 text-slate-700">
-          <Bluetooth className="h-3.5 w-3.5 text-blue-500" />
+          <Bluetooth className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
           <span className="font-mono font-semibold">{printer.name}</span>
+          <span className="text-slate-400 font-mono text-[11px]">
+            {printer.mac}
+          </span>
         </div>
-        <div>
-          <span className="text-muted-foreground">ID:</span>{" "}
-          <span className="font-mono">{printer.id}</span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">MAC:</span>{" "}
-          <span className="font-mono">{printer.mac}</span>
-        </div>
-      </div>
-
-      <div
-        className={`rounded-lg border px-3 py-2 text-xs ${
-          !health
-            ? "border-slate-200 bg-slate-50 text-slate-600"
-            : health.reachable
-              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-              : "border-red-200 bg-red-50 text-red-800"
-        }`}
-      >
-        <div className="font-semibold">
-          {health
-            ? health.reachable
-              ? "Service Reachable"
-              : "Service Unreachable"
-            : "Service status not checked yet"}
-        </div>
-        <div className="mt-1">
-          {health
-            ? health.detail
-            : `Use Check Connection to probe ${RAWBT_LOCAL_SERVICE_ORIGIN}`}
-        </div>
-        {health && (
-          <div className="mt-1 text-[11px] opacity-80">
-            Last checked: {formatCheckedAt(health.checkedAt)}
+        {status.connected && status.name && (
+          <div className="text-emerald-700 font-medium">
+            Active: {status.name}{" "}
+            {status.type ? (
+              <span className="font-normal text-slate-500">
+                via {status.type}
+              </span>
+            ) : null}
           </div>
         )}
       </div>
 
-      <div className="grid gap-2">
+      {/* Connect / Disconnect */}
+      {status.connected ? (
         <Button
           className="w-full gap-2"
           variant="outline"
-          onClick={runConnectionCheck}
-          disabled={!!busyAction}
+          onClick={handleDisconnect}
+          disabled={!!busy}
         >
-          {busyAction === "connection" ? (
+          {busy === "disconnect" ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
-            <Activity className="h-4 w-4" />
+            <Unplug className="h-4 w-4" />
           )}
-          Check Connection
+          Disconnect
         </Button>
+      ) : (
+        <Button
+          className="w-full gap-2 bg-blue-600 hover:bg-blue-700 text-white border-0"
+          onClick={handleConnect}
+          disabled={!!busy}
+        >
+          {busy === "connect" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Bluetooth className="h-4 w-4" />
+          )}
+          Connect via Bluetooth
+        </Button>
+      )}
 
-        <Button
-          className="w-full gap-2"
-          variant="outline"
-          onClick={runRoutingTest}
-          disabled={!!busyAction}
-        >
-          {busyAction === "routing" ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Route className="h-4 w-4" />
-          )}
-          Test Routing
-        </Button>
+      {/* Print actions — only shown when connected */}
+      {status.connected && (
+        <div className="grid gap-2 border-t pt-3">
+          <Button
+            className="w-full gap-2"
+            variant="outline"
+            onClick={handleRoutingTest}
+            disabled={!!busy}
+          >
+            {busy === "routing" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Route className="h-4 w-4" />
+            )}
+            Test Routing
+            <span className="text-xs text-muted-foreground font-normal ml-auto">
+              tiny marker
+            </span>
+          </Button>
 
-        <Button
-          className="w-full gap-2"
-          variant="outline"
-          onClick={runDemoLayout}
-          disabled={!!busyAction}
-        >
-          {busyAction === "demo" ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Printer className="h-4 w-4" />
-          )}
-          Print Demo Layout
-        </Button>
-      </div>
+          <Button
+            className="w-full gap-2"
+            variant="outline"
+            onClick={handleDemoLayout}
+            disabled={!!busy}
+          >
+            {busy === "demo" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Printer className="h-4 w-4" />
+            )}
+            Print Demo Layout
+            <span className="text-xs text-muted-foreground font-normal ml-auto">
+              full receipt
+            </span>
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -238,120 +223,37 @@ export default function PrinterSetupDialog({
   open,
   onOpenChange,
 }: PrinterSetupDialogProps) {
-  const [serviceHealth, setServiceHealth] = useState<RawBTServiceHealth | null>(
-    null,
-  );
-  const [checkingService, setCheckingService] = useState(false);
-
-  const runGlobalConnectionCheck = useCallback(async () => {
-    setCheckingService(true);
-    try {
-      const result = await checkRawBTServiceConnection();
-      setServiceHealth((previous) => {
-        if (previous?.reachable !== false && result.reachable === false) {
-          toast.error(
-            "Printer Service Disconnected. Please tap the RawBT app to wake it up.",
-          );
-        }
-        return result;
-      });
-      return result;
-    } finally {
-      setCheckingService(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!open) {
-      setServiceHealth(null);
-      return;
-    }
-
-    runGlobalConnectionCheck().catch(() => {});
-    const interval = setInterval(() => {
-      runGlobalConnectionCheck().catch(() => {});
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [open, runGlobalConnectionCheck]);
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Printer className="h-4 w-4" />
-            Printer Setup — RawBT Silent Print Service
+            <Bluetooth className="h-4 w-4 text-blue-500" />
+            Printer Setup — Direct Bluetooth
           </DialogTitle>
         </DialogHeader>
 
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 space-y-1">
-          <p className="font-semibold">
-            No manual Bluetooth or USB selection is required.
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 space-y-1.5">
+          <p className="font-semibold">How to connect:</p>
+          <p>
+            1. Make sure each printer is <strong>powered on</strong> and within
+            range.
           </p>
           <p>
-            The POS posts jobs directly to
-            <span className="font-mono"> {RAWBT_LOCAL_SERVICE_URL}</span>,
-            routes by
-            <span className="font-mono"> bt_address</span>, and declares
-            <span className="font-mono"> {RAWBT_CODEPAGE}</span> in the job
-            payload.
+            2. Tap <strong>Connect via Bluetooth</strong> on each printer card
+            below.
           </p>
           <p>
-            Each printer card now separates <strong>Check Connection</strong>,{" "}
-            <strong>Test Routing</strong>, and
-            <strong> Print Demo Layout</strong> so staff can avoid confusing a
-            live route test with a full receipt.
+            3. Pick the correct device from the Chrome browser dialog — look for{" "}
+            <span className="font-mono">{PRINTER_NAMES.cashier}</span> (cashier)
+            and <span className="font-mono">{PRINTER_NAMES.kitchen}</span>{" "}
+            (kitchen).
           </p>
-        </div>
-
-        <div className="rounded-lg border bg-slate-50 p-3 text-xs space-y-2">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <div className="font-semibold text-slate-900">
-                RawBT Service Reachability
-              </div>
-              <div className="text-slate-600 mt-0.5">
-                {serviceHealth
-                  ? serviceHealth.detail
-                  : `Checking whether ${RAWBT_LOCAL_SERVICE_ORIGIN} is reachable from Chrome.`}
-              </div>
-            </div>
-            <Badge
-              variant="secondary"
-              className={
-                serviceHealth
-                  ? serviceHealth.reachable
-                    ? "bg-emerald-100 text-emerald-800 gap-2"
-                    : "bg-red-100 text-red-800 gap-2"
-                  : "gap-2"
-              }
-            >
-              <StatusDot live={serviceHealth?.reachable ?? false} />
-              {checkingService
-                ? "Checking…"
-                : serviceHealth
-                  ? serviceHealth.reachable
-                    ? "Live"
-                    : "Disconnected"
-                  : "Unknown"}
-            </Badge>
-          </div>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="gap-2"
-            onClick={runGlobalConnectionCheck}
-            disabled={checkingService}
-          >
-            {checkingService ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Activity className="h-4 w-4" />
-            )}
-            Check RawBT Service
-          </Button>
+          <p>
+            4. Once connected, use <strong>Test Routing</strong> to confirm each
+            printer prints in the right place, then{" "}
+            <strong>Print Demo Layout</strong> for a full visual check.
+          </p>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">
@@ -368,18 +270,18 @@ export default function PrinterSetupDialog({
         </div>
 
         <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-700 space-y-1">
-          <p className="font-semibold text-slate-900">Operational notes</p>
+          <p className="font-semibold text-slate-900">Tips</p>
           <p>
-            • Connection checks only verify that the RawBT local service is
-            reachable.
+            • The browser remembers authorized devices — next time, printers
+            reconnect automatically on page load (no picker dialog).
           </p>
           <p>
-            • Routing tests print a tiny unmistakable marker to the assigned
-            printer.
+            • If the picker shows no printers, make sure the printer is on and
+            not already connected to another device.
           </p>
           <p>
-            • Demo layout prints the full sample receipt/ticket format for
-            visual QA.
+            • Use Chrome on Android for best Bluetooth compatibility. The app
+            must be open in a regular browser tab, not an iframe preview.
           </p>
         </div>
       </DialogContent>

@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { PrintData } from "@/lib/escpos";
 import {
-  RAWBT_LOCAL_SERVICE_URL,
   buildKitchenTicketText,
   getMappedPrinter,
   printCashierReceipt,
   printKitchenTicket,
+  PRINTER_MAPPINGS,
 } from "@/lib/rawbt-service";
 
 const STORAGE_KEY = "cgd_active_receipt";
@@ -92,7 +92,7 @@ export default function ReceiptPage() {
       toast.error("Retry print failed", {
         description: describeError(
           error,
-          "Could not reach the RawBT local print service.",
+          "Printer not connected. Open Printer Setup to connect via Bluetooth.",
         ),
       });
     }
@@ -116,7 +116,7 @@ export default function ReceiptPage() {
         toast.error("Printing failed", {
           description: describeError(
             error,
-            "Could not reach the RawBT local print service.",
+            "Printer not connected. Open Printer Setup to connect via Bluetooth.",
           ),
         });
       }
@@ -226,7 +226,7 @@ export default function ReceiptPage() {
               toast.error("Cashier print failed", {
                 description: describeError(
                   error,
-                  "Could not reach the RawBT local print service.",
+                  "Cashier printer not connected. Open Printer Setup to connect via Bluetooth.",
                 ),
               });
             }
@@ -257,7 +257,7 @@ export default function ReceiptPage() {
                 toast.error("Kitchen print failed", {
                   description: describeError(
                     error,
-                    "Could not reach the RawBT local print service.",
+                    "Kitchen printer not connected. Open Printer Setup to connect via Bluetooth.",
                   ),
                 });
               }
@@ -347,29 +347,31 @@ export default function ReceiptPage() {
         }}
       >
         <div style={{ fontWeight: 700, color: "#f8fafc", marginBottom: 6 }}>
-          RawBT silent service routing
-        </div>
-        <div>
-          • Endpoint:{" "}
-          <span style={{ fontFamily: "monospace" }}>
-            {RAWBT_LOCAL_SERVICE_URL}
-          </span>
+          Bluetooth printer routing
         </div>
         <div>
           • Cashier →{" "}
-          <span style={{ fontFamily: "monospace" }}>{cashierPrinter.name}</span>{" "}
-          (<span style={{ fontFamily: "monospace" }}>{cashierPrinter.mac}</span>
+          <span style={{ fontFamily: "monospace" }}>
+            {PRINTER_MAPPINGS.cashier.name}
+          </span>{" "}
+          (
+          <span style={{ fontFamily: "monospace" }}>
+            {PRINTER_MAPPINGS.cashier.mac}
+          </span>
           )
         </div>
         <div>
           • Kitchen →{" "}
-          <span style={{ fontFamily: "monospace" }}>{kitchenPrinter.name}</span>{" "}
-          (<span style={{ fontFamily: "monospace" }}>{kitchenPrinter.mac}</span>
+          <span style={{ fontFamily: "monospace" }}>
+            {PRINTER_MAPPINGS.kitchen.name}
+          </span>{" "}
+          (
+          <span style={{ fontFamily: "monospace" }}>
+            {PRINTER_MAPPINGS.kitchen.mac}
+          </span>
           )
         </div>
-        <div>
-          • Code page: <span style={{ fontFamily: "monospace" }}>WCP1252</span>
-        </div>
+        <div>• Transport: Web Bluetooth (BLE), direct from Chrome</div>
       </div>
 
       {allDone && (

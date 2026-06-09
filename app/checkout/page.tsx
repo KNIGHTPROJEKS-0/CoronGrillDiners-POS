@@ -41,6 +41,7 @@ import {
   printCashierReceipt,
   printKitchenTicket,
 } from "@/lib/rawbt-service";
+import { usePrinterStatus } from "@/app/hooks/use-printer-status";
 import { useShift } from "@/hooks/use-shift";
 
 function generateOrderNumber() {
@@ -127,8 +128,10 @@ export default function CheckoutPage() {
     }
   }, [showSummaryModal]);
 
-  const cashierPrinter = getMappedPrinter("cashier");
-  const kitchenPrinter = getMappedPrinter("kitchen");
+  const cashierMapped = getMappedPrinter("cashier");
+  const kitchenMapped = getMappedPrinter("kitchen");
+  const cashierStatus = usePrinterStatus("cashier");
+  const kitchenStatus = usePrinterStatus("kitchen");
 
   const isAdmin = session?.user?.role === "admin";
 
@@ -316,14 +319,14 @@ export default function CheckoutPage() {
     setIsBusy(true);
     try {
       await runPrintFlow({ cashier: true });
-      toast.success(`Receipt sent to ${cashierPrinter.name}`, {
-        description: `${cashierPrinter.mac} via RawBT local service`,
-      });
+      toast.success(
+        `Receipt sent to ${cashierStatus.name || cashierMapped.name}`,
+      );
     } catch (error) {
       toast.error("Cashier print failed", {
         description: describeError(
           error,
-          "Could not reach the RawBT local print service.",
+          "Cashier printer not connected. Open Printer Setup to connect via Bluetooth.",
         ),
       });
     } finally {
@@ -335,14 +338,14 @@ export default function CheckoutPage() {
     setIsBusy(true);
     try {
       await runPrintFlow({ kitchen: true });
-      toast.success(`Kitchen ticket sent to ${kitchenPrinter.name}`, {
-        description: `${kitchenPrinter.mac} via RawBT local service`,
-      });
+      toast.success(
+        `Kitchen ticket sent to ${kitchenStatus.name || kitchenMapped.name}`,
+      );
     } catch (error) {
       toast.error("Kitchen print failed", {
         description: describeError(
           error,
-          "Could not reach the RawBT local print service.",
+          "Kitchen printer not connected. Open Printer Setup to connect via Bluetooth.",
         ),
       });
     } finally {
@@ -361,7 +364,7 @@ export default function CheckoutPage() {
       toast.error("Print failed", {
         description: describeError(
           error,
-          "Could not reach the RawBT local print service.",
+          "Printer not connected. Open Printer Setup to connect via Bluetooth.",
         ),
       });
     } finally {
@@ -383,7 +386,7 @@ export default function CheckoutPage() {
       } catch (error) {
         console.error("[CHECKOUT] print after save failed:", error);
         toast.error("Order saved, but printing failed", {
-          description: `${orderNumber} was saved. You can reprint it from Order History.`,
+          description: `${orderNumber} was saved. You can reprint from Order History, or connect printers in Printer Setup.`,
         });
       }
 
@@ -656,24 +659,53 @@ export default function CheckoutPage() {
             </div>
           </div>
 
-          {/* Fixed printer routing row */}
-          <div className="space-y-2 px-0.5">
-            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-              <Badge variant="secondary" className="gap-1.5">
-                <Receipt className="h-3.5 w-3.5" />
-                Cashier → {cashierPrinter.name}
+          {/* Live Bluetooth printer status row */}
+          <div className="space-y-1.5 px-0.5">
+            <div className="flex flex-wrap gap-2 text-xs">
+              <Badge
+                variant="secondary"
+                className={`gap-1.5 ${
+                  cashierStatus.connected
+                    ? "bg-emerald-100 text-emerald-800"
+                    : "bg-amber-50 text-amber-700 border border-amber-200"
+                }`}
+              >
+                <span
+                  className={`inline-block h-2 w-2 rounded-full ${
+                    cashierStatus.connected ? "bg-emerald-500" : "bg-amber-400"
+                  }`}
+                />
+                <Receipt className="h-3 w-3" />
+                {cashierStatus.connected
+                  ? `Cashier — ${cashierStatus.name}`
+                  : `Cashier — not connected`}
               </Badge>
-              <Badge variant="secondary" className="gap-1.5">
-                <ChefHat className="h-3.5 w-3.5" />
-                Kitchen → {kitchenPrinter.name}
+              <Badge
+                variant="secondary"
+                className={`gap-1.5 ${
+                  kitchenStatus.connected
+                    ? "bg-emerald-100 text-emerald-800"
+                    : "bg-amber-50 text-amber-700 border border-amber-200"
+                }`}
+              >
+                <span
+                  className={`inline-block h-2 w-2 rounded-full ${
+                    kitchenStatus.connected ? "bg-emerald-500" : "bg-amber-400"
+                  }`}
+                />
+                <ChefHat className="h-3 w-3" />
+                {kitchenStatus.connected
+                  ? `Kitchen — ${kitchenStatus.name}`
+                  : `Kitchen — not connected`}
               </Badge>
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Silent RawBT routing is fixed in the app: cashier jobs go to
-              <span className="font-mono"> {cashierPrinter.mac}</span> and
-              kitchen jobs go to
-              <span className="font-mono"> {kitchenPrinter.mac}</span>.
-            </p>
+            {(!cashierStatus.connected || !kitchenStatus.connected) && (
+              <p className="text-[11px] text-amber-600 leading-relaxed">
+                One or more printers not connected — open{" "}
+                <strong>Printer Setup</strong> in the sidebar to connect via
+                Bluetooth.
+              </p>
+            )}
           </div>
 
           {/* Kitchen ticket toggle */}
