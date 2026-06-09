@@ -6,6 +6,20 @@ import { logEvent } from "@/lib/audit"
 
 export async function GET() {
   try {
+    // Add missing columns
+    const client = await pool.connect()
+    try {
+      await client.query(`
+        ALTER TABLE products ADD COLUMN IF NOT EXISTS available BOOLEAN DEFAULT TRUE;
+        ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INTEGER;
+        ALTER TABLE products ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;
+        ALTER TABLE products ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
+        ALTER TABLE products ADD COLUMN IF NOT EXISTS deleted_by TEXT;
+      `)
+    } finally {
+      client.release()
+    }
+
     // Check if stock column exists
     const hasStock = await hasColumn("products", "stock")
     const hasIsDeleted = await hasColumn("products", "is_deleted")

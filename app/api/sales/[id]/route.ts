@@ -4,6 +4,19 @@ import { authOptions } from "@/lib/auth"
 import pool, { hasColumn } from "@/lib/db"
 import { logEvent } from "@/lib/audit"
 
+// Helper function to add missing columns to sales table
+async function ensureSalesTableColumns() {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      ALTER TABLE sales ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'completed';
+      ALTER TABLE sales ADD COLUMN IF NOT EXISTS void_reason TEXT;
+    `);
+  } finally {
+    client.release();
+  }
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -13,6 +26,9 @@ export async function PATCH(
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+
+  // Ensure sales table has status and void_reason columns
+  await ensureSalesTableColumns();
 
   try {
     const { status, voidReason, isDeleted } = await request.json()

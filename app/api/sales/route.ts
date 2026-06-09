@@ -8,6 +8,19 @@ import pool, {
 } from "@/lib/db";
 import { logEvent } from "@/lib/audit";
 
+// Helper function to add missing columns to sales table
+async function ensureSalesTableColumns() {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      ALTER TABLE sales ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'completed';
+      ALTER TABLE sales ADD COLUMN IF NOT EXISTS void_reason TEXT;
+    `);
+  } finally {
+    client.release();
+  }
+}
+
 // Helper to compute overnight flags and labels
 function addOvernightFields(sale: any) {
   let isOvernightShiftOrder = false;
@@ -248,6 +261,9 @@ export async function POST(request: Request) {
     userRole: (session?.user as any)?.role,
   });
 
+  // Ensure sales table has status and void_reason columns
+  await ensureSalesTableColumns();
+
   if (!session?.user) {
     console.error("[SALES API] Unauthorized - no session or user");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -351,6 +367,25 @@ export async function POST(request: Request) {
         orderNumber: sale.order_number,
       });
 
+      // Decrease stock for each product in sale
+      console.log("[SALES API] Updating product stock levels...");
+      for (const item of items) {
+        if (item.id) { // Make sure item has id
+          const quantity = Number(item.quantity);
+          if (quantity > 0) {
+            await client.query(
+              `UPDATE public.products
+               SET stock = CASE
+                 WHEN stock IS NOT NULL THEN stock - $1
+                 ELSE NULL
+               END
+               WHERE id = $2`,
+              [quantity, item.id]
+            );
+          }
+        }
+      }
+
       // Update shift metrics if shift_id is provided
       if (shiftId && paymentMethod === "cash") {
         console.log("[SALES API] Updating shift metrics for cash sale:", {
@@ -434,6 +469,10 @@ export async function GET(request: Request) {
     userId: session?.user?.id,
     userRole: session?.user ? (session.user as any)?.role : null,
   });
+
+  // Ensure sales table has status and void_reason columns
+  await ensureSalesTableColumns();
+
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
