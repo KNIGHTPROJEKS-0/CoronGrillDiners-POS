@@ -336,10 +336,14 @@ export default function CheckoutPage() {
   const handleQuickPrintCashier = async () => {
     setIsBusy(true);
     try {
-      await runPrintFlow({ cashier: true });
-      toast.success(
-        `Receipt sent to ${cashierStatus.name || cashierMapped.name}`,
-      );
+      const outcome = await printCashierReceipt(printData);
+      if (outcome === "bluetooth" || outcome === "usb") {
+        toast.success(
+          `Receipt printed — ${cashierStatus.name || cashierMapped.name}`,
+        );
+      } else {
+        toast.info("Sent to RawBT — verify on the cashier printer");
+      }
     } catch (error) {
       toast.error("Cashier print failed", {
         description: describeError(
@@ -355,10 +359,14 @@ export default function CheckoutPage() {
   const handleQuickPrintKitchen = async () => {
     setIsBusy(true);
     try {
-      await runPrintFlow({ kitchen: true });
-      toast.success(
-        `Kitchen ticket sent to ${kitchenStatus.name || kitchenMapped.name}`,
-      );
+      const outcome = await printKitchenTicket(printData);
+      if (outcome === "bluetooth" || outcome === "usb") {
+        toast.success(
+          `Kitchen ticket printed — ${kitchenStatus.name || kitchenMapped.name}`,
+        );
+      } else {
+        toast.info("Sent to RawBT — verify on the kitchen printer");
+      }
     } catch (error) {
       toast.error("Kitchen print failed", {
         description: describeError(

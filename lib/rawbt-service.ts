@@ -174,22 +174,37 @@ async function triggerRawBTIntent(data: Uint8Array): Promise<void> {
   }
 }
 
-export async function printCashierReceipt(data: PrintData): Promise<void> {
+/**
+ * Outcome of a print attempt:
+ *   "bluetooth" — printed directly via Web Bluetooth (confirmed)
+ *   "usb"       — printed directly via Web Serial/USB (confirmed)
+ *   "rawbt"     — BLE unavailable; rawbt:// intent fired as backup (unconfirmed)
+ *   "none"      — nothing happened (should not occur with RawBT fallback)
+ */
+export type PrintOutcome = "bluetooth" | "usb" | "rawbt" | "none";
+
+export async function printCashierReceipt(
+  data: PrintData,
+): Promise<PrintOutcome> {
   const bytes = buildCustomerReceipt(data);
-  // 1. Try direct Web Bluetooth / USB
+  // 1. Try direct Web Bluetooth / USB (confirmed print)
   const result = await printTo("cashier", bytes);
-  if (result !== "none") return;
-  // 2. BLE not connected — fall back to RawBT intent URL (Android backup)
+  if (result !== "none") return result as "bluetooth" | "usb";
+  // 2. BLE not connected — fire RawBT intent URL as Android backup
   await triggerRawBTIntent(bytes);
+  return "rawbt";
 }
 
-export async function printKitchenTicket(data: PrintData): Promise<void> {
+export async function printKitchenTicket(
+  data: PrintData,
+): Promise<PrintOutcome> {
   const bytes = buildKitchenTicket(data);
-  // 1. Try direct Web Bluetooth / USB
+  // 1. Try direct Web Bluetooth / USB (confirmed print)
   const result = await printTo("kitchen", bytes);
-  if (result !== "none") return;
-  // 2. BLE not connected — fall back to RawBT intent URL (Android backup)
+  if (result !== "none") return result as "bluetooth" | "usb";
+  // 2. BLE not connected — fire RawBT intent URL as Android backup
   await triggerRawBTIntent(bytes);
+  return "rawbt";
 }
 
 export async function printRoleRoutingTest(role: PrinterRole): Promise<void> {

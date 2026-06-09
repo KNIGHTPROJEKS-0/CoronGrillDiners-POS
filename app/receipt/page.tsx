@@ -10,6 +10,7 @@ import {
   printCashierReceipt,
   printKitchenTicket,
   PRINTER_MAPPINGS,
+  type PrintOutcome,
 } from "@/lib/rawbt-service";
 
 const STORAGE_KEY = "cgd_active_receipt";
@@ -31,12 +32,13 @@ export default function ReceiptPage() {
   const router = useRouter();
   const [entry, setEntry] = useState<ReceiptEntry | null>(null);
   const [selected, setSelected] = useState<Selection>("cashier");
+  // BLE/USB confirmed prints — controls auto-navigate and "✅" button state
   const [cashierDone, setCashierDone] = useState(false);
   const [kitchenDone, setKitchenDone] = useState(false);
+  // RawBT intent fired (unconfirmed) — BLE was not available
+  const [cashierViaRawbt, setCashierViaRawbt] = useState(false);
+  const [kitchenViaRawbt, setKitchenViaRawbt] = useState(false);
   const autoPrintedRef = useRef(false);
-
-  const cashierPrinter = getMappedPrinter("cashier");
-  const kitchenPrinter = getMappedPrinter("kitchen");
 
   useEffect(() => {
     try {
@@ -67,27 +69,58 @@ export default function ReceiptPage() {
     return fallback;
   }
 
-  const doPrintCashier = useCallback(async () => {
+  /**
+   * Attempt cashier print. Returns the outcome so callers can branch on it.
+   * Only sets cashierDone=true when BLE/USB actually confirmed the print.
+   */
+  const doPrintCashier = useCallback(async (): Promise<PrintOutcome> => {
     const data = getPrintData();
-    if (!data) return;
-
-    await printCashierReceipt(data);
-    setCashierDone(true);
+    if (!data) return "none";
+    const outcome = await printCashierReceipt(data);
+    if (outcome === "bluetooth" || outcome === "usb") {
+      setCashierDone(true);
+      setCashierViaRawbt(false);
+    } else if (outcome === "rawbt") {
+      setCashierViaRawbt(true);
+    }
+    return outcome;
   }, [getPrintData]);
 
-  const doPrintKitchen = useCallback(async () => {
+  /**
+   * Attempt kitchen print. Returns the outcome so callers can branch on it.
+   * Only sets kitchenDone=true when BLE/USB actually confirmed the print.
+   */
+  const doPrintKitchen = useCallback(async (): Promise<PrintOutcome> => {
     const data = getPrintData();
-    if (!data) return;
-
-    await printKitchenTicket(data);
-    setKitchenDone(true);
+    if (!data) return "none";
+    const outcome = await printKitchenTicket(data);
+    if (outcome === "bluetooth" || outcome === "usb") {
+      setKitchenDone(true);
+      setKitchenViaRawbt(false);
+    } else if (outcome === "rawbt") {
+      setKitchenViaRawbt(true);
+    }
+    return outcome;
   }, [getPrintData]);
 
   async function retryAll() {
     try {
-      await doPrintCashier();
-      if (entry?.kitchenText) await doPrintKitchen();
-      toast.success("Print jobs sent successfully");
+      const cashierOutcome = await doPrintCashier();
+      let kitchenOutcome: PrintOutcome = "none";
+      if (entry?.kitchenText) kitchenOutcome = await doPrintKitchen();
+
+      const cashierOk =
+        cashierOutcome === "bluetooth" || cashierOutcome === "usb";
+      const kitchenOk =
+        !entry?.kitchenText ||
+        kitchenOutcome === "bluetooth" ||
+        kitchenOutcome === "usb";
+
+      if (cashierOk && kitchenOk) {
+        toast.success("Printed via Bluetooth ✓");
+      } else if (cashierOutcome === "rawbt" || kitchenOutcome === "rawbt") {
+        toast.info("Sent to RawBT backup — verify on the physical printer");
+      }
     } catch (error) {
       toast.error("Retry print failed", {
         description: describeError(
@@ -98,6 +131,9 @@ export default function ReceiptPage() {
     }
   }
 
+  // ── Auto-print on mount ───────────────────────────────────────────────────────
+  // Attempts printing once when entry data arrives. Does NOT auto-navigate —
+  // the separate effect below handles navigation only after BLE is confirmed.
   useEffect(() => {
     if (!entry || autoPrintedRef.current) return;
     autoPrintedRef.current = true;
@@ -107,10 +143,8 @@ export default function ReceiptPage() {
         if (entry.autoPrintKitchen && entry.kitchenText) {
           await doPrintKitchen();
         }
-
-        setTimeout(() => {
-          router.push(entry.returnPath || "/");
-        }, 1800);
+        // ⚠️  No router.push here. The auto-navigate effect below handles that
+        // only when BLE printing is actually confirmed (cashierDone / kitchenDone).
       } catch (error) {
         console.error("Receipt auto-print failed:", error);
         toast.error("Printing failed", {
@@ -121,7 +155,22 @@ export default function ReceiptPage() {
         });
       }
     })();
-  }, [doPrintCashier, doPrintKitchen, entry, router]);
+  }, [doPrintCashier, doPrintKitchen, entry]);
+
+  // hasKitchen is derived here so it's available for effects below
+  const hasKitchen = !!entry?.kitchenText;
+
+  // ── Auto-navigate ONLY after confirmed BLE/USB print ───────────────────────
+  // Fires a 5-second countdown that the cashier can interrupt with the
+  // "Back to POS" button. Does NOT fire if only RawBT intent was used.
+  const allDoneConfirmed = cashierDone && (!hasKitchen || kitchenDone);
+
+  useEffect(() => {
+    if (!allDoneConfirmed || !entry) return;
+    const returnPath = entry.returnPath || "/";
+    const t = setTimeout(() => router.push(returnPath), 5000);
+    return () => clearTimeout(t);
+  }, [allDoneConfirmed, entry, router]);
 
   function sanitize(s: string) {
     return s.replace(/[^a-zA-Z0-9-]/g, "");
@@ -158,9 +207,6 @@ export default function ReceiptPage() {
   function doBackToPOS() {
     router.push(entry?.returnPath ?? "/");
   }
-
-  const hasKitchen = !!entry?.kitchenText;
-  const allDone = cashierDone && (!hasKitchen || kitchenDone);
 
   if (!entry) {
     return (
@@ -220,8 +266,12 @@ export default function ReceiptPage() {
         <button
           onClick={async () => {
             try {
-              await doPrintCashier();
-              toast.success(`Receipt sent to ${cashierPrinter.name}`);
+              const outcome = await doPrintCashier();
+              if (outcome === "bluetooth" || outcome === "usb") {
+                toast.success("Receipt printed via Bluetooth ✓");
+              } else {
+                toast.info("Sent to RawBT — verify on the printer");
+              }
             } catch (error) {
               toast.error("Cashier print failed", {
                 description: describeError(
@@ -236,23 +286,39 @@ export default function ReceiptPage() {
             borderRadius: 6,
             cursor: "pointer",
             whiteSpace: "nowrap",
-            background: cashierDone ? "#15803d" : "#16a34a",
+            background: cashierDone
+              ? "#15803d"
+              : cashierViaRawbt
+                ? "#92400e"
+                : "#16a34a",
             color: "#fff",
-            boxShadow: "0 2px 8px rgba(22,163,74,.4)",
+            boxShadow: cashierDone
+              ? "0 2px 8px rgba(21,128,61,.4)"
+              : cashierViaRawbt
+                ? "0 2px 8px rgba(146,64,14,.4)"
+                : "0 2px 8px rgba(22,163,74,.4)",
             fontSize: 13,
             padding: "10px 16px",
             fontWeight: 700,
           }}
         >
-          {cashierDone ? "✅ Receipt Printed" : "🖨 Print Receipt"}
+          {cashierDone
+            ? "✅ Receipt Printed"
+            : cashierViaRawbt
+              ? "📲 Sent via RawBT"
+              : "🖨 Print Receipt"}
         </button>
 
         {hasKitchen && (
           <button
             onClick={async () => {
               try {
-                await doPrintKitchen();
-                toast.success(`Kitchen ticket sent to ${kitchenPrinter.name}`);
+                const outcome = await doPrintKitchen();
+                if (outcome === "bluetooth" || outcome === "usb") {
+                  toast.success("Kitchen ticket printed via Bluetooth ✓");
+                } else {
+                  toast.info("Sent to RawBT — verify on the printer");
+                }
               } catch (error) {
                 toast.error("Kitchen print failed", {
                   description: describeError(
@@ -267,15 +333,27 @@ export default function ReceiptPage() {
               borderRadius: 6,
               cursor: "pointer",
               whiteSpace: "nowrap",
-              background: kitchenDone ? "#b45309" : "#d97706",
+              background: kitchenDone
+                ? "#b45309"
+                : kitchenViaRawbt
+                  ? "#92400e"
+                  : "#d97706",
               color: "#fff",
-              boxShadow: "0 2px 8px rgba(217,119,6,.4)",
+              boxShadow: kitchenDone
+                ? "0 2px 8px rgba(180,83,9,.4)"
+                : kitchenViaRawbt
+                  ? "0 2px 8px rgba(146,64,14,.4)"
+                  : "0 2px 8px rgba(217,119,6,.4)",
               fontSize: 13,
               padding: "10px 16px",
               fontWeight: 700,
             }}
           >
-            {kitchenDone ? "✅ Kitchen Printed" : "🍳 Print to Kitchen"}
+            {kitchenDone
+              ? "✅ Kitchen Printed"
+              : kitchenViaRawbt
+                ? "📲 Sent via RawBT"
+                : "🍳 Print to Kitchen"}
           </button>
         )}
 
@@ -374,7 +452,7 @@ export default function ReceiptPage() {
         <div>• Transport: Web Bluetooth (BLE), direct from Chrome</div>
       </div>
 
-      {allDone && (
+      {allDoneConfirmed && (
         <div
           style={{
             background: "#052e16",
@@ -388,11 +466,40 @@ export default function ReceiptPage() {
             fontFamily: "sans-serif",
           }}
         >
-          ✅ Printed successfully! Returning to POS…
+          ✅ Printed via Bluetooth — returning to POS in 5 seconds…
+          <br />
+          <span style={{ fontSize: 12, opacity: 0.8 }}>
+            Tap “← Back to POS” above to return immediately.
+          </span>
         </div>
       )}
 
-      {!allDone && (
+      {(cashierViaRawbt || kitchenViaRawbt) && !allDoneConfirmed && (
+        <div
+          style={{
+            background: "#431407",
+            border: "1px solid #c2410c",
+            borderRadius: 8,
+            margin: "12px 16px",
+            padding: "12px 16px",
+            color: "#fed7aa",
+            textAlign: "center",
+            fontSize: 13,
+            fontFamily: "sans-serif",
+            lineHeight: 1.6,
+          }}
+        >
+          📲 <strong>Sent via RawBT backup</strong> — check that the printer
+          actually printed.
+          <br />
+          <span style={{ fontSize: 12, opacity: 0.85 }}>
+            To confirm Bluetooth routing, connect in Printer Setup and tap 🔄
+            Retry Print.
+          </span>
+        </div>
+      )}
+
+      {!allDoneConfirmed && !cashierViaRawbt && !kitchenViaRawbt && (
         <div
           style={{
             background: "#1e293b",
