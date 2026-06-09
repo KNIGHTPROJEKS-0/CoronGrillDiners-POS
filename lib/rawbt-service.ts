@@ -144,23 +144,52 @@ export function buildKitchenTicketText(data: PrintData): string {
   return lines.join("\n");
 }
 
-// ─── Bluetooth transport ────────────────────────────────────────────────────────
+// ─── Bluetooth transport + RawBT intent-URL fallback ──────────────────────────
 
-function notConnectedError(role: PrinterRole): Error {
-  const label = PRINTER_MAPPINGS[role].label;
-  return new Error(
-    `${label} is not connected. Open Printer Setup and tap "Connect via Bluetooth".`,
-  );
+/**
+ * Fires the rawbt:// intent URL as a silent backup when Bluetooth is unavailable.
+ * Works on Android Chrome when the RawBT app is installed and running.
+ * Uses whatever printer RawBT currently has selected as its default.
+ * Always returns true (fire-and-forget — we cannot detect success from a PWA).
+ */
+async function triggerRawBTIntent(data: Uint8Array): Promise<void> {
+  if (typeof document === "undefined") return;
+  try {
+    // latin1 preserves every byte value 0-255 without mangling binary sequences
+    const text = new TextDecoder("latin1").decode(data);
+    const urlEncoded = encodeURIComponent(text);
+    const iframe = document.createElement("iframe");
+    iframe.style.display = "none";
+    iframe.src = `rawbt://print?text=${urlEncoded}`;
+    document.body.appendChild(iframe);
+    setTimeout(() => {
+      try {
+        if (iframe.parentNode) document.body.removeChild(iframe);
+      } catch {
+        /* ignore */
+      }
+    }, 200);
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function printCashierReceipt(data: PrintData): Promise<void> {
-  const result = await printTo("cashier", buildCustomerReceipt(data));
-  if (result === "none") throw notConnectedError("cashier");
+  const bytes = buildCustomerReceipt(data);
+  // 1. Try direct Web Bluetooth / USB
+  const result = await printTo("cashier", bytes);
+  if (result !== "none") return;
+  // 2. BLE not connected — fall back to RawBT intent URL (Android backup)
+  await triggerRawBTIntent(bytes);
 }
 
 export async function printKitchenTicket(data: PrintData): Promise<void> {
-  const result = await printTo("kitchen", buildKitchenTicket(data));
-  if (result === "none") throw notConnectedError("kitchen");
+  const bytes = buildKitchenTicket(data);
+  // 1. Try direct Web Bluetooth / USB
+  const result = await printTo("kitchen", bytes);
+  if (result !== "none") return;
+  // 2. BLE not connected — fall back to RawBT intent URL (Android backup)
+  await triggerRawBTIntent(bytes);
 }
 
 export async function printRoleRoutingTest(role: PrinterRole): Promise<void> {
@@ -201,7 +230,12 @@ export async function printRoleRoutingTest(role: PrinterRole): Promise<void> {
   bytes.push(GS, 0x56, 0x01); // GS V 1  — PARTIAL CUT
 
   const result = await printTo(role, new Uint8Array(bytes));
-  if (result === "none") throw notConnectedError(role);
+  if (result === "none") {
+    const label = PRINTER_MAPPINGS[role].label;
+    throw new Error(
+      `${label} is not connected. Open Printer Setup and tap "Connect via Bluetooth" first.`,
+    );
+  }
 }
 
 export async function printRoleDemoLayout(role: PrinterRole): Promise<void> {

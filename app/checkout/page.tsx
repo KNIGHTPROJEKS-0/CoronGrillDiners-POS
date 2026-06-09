@@ -37,12 +37,39 @@ import ThermalReceipt from "../components/thermal-receipt";
 import { savePendingSale } from "@/hooks/use-offline-sync";
 import { type PrintData } from "@/lib/escpos";
 import {
+  buildCashierReceiptText,
+  buildKitchenTicketText,
   getMappedPrinter,
   printCashierReceipt,
   printKitchenTicket,
 } from "@/lib/rawbt-service";
 import { usePrinterStatus } from "@/app/hooks/use-printer-status";
 import { useShift } from "@/hooks/use-shift";
+
+function storeReceiptData(
+  d: PrintData,
+  returnPath: string,
+  withKitchen = false,
+): void {
+  const receiptText = buildCashierReceiptText(d);
+  const kitchenText = buildKitchenTicketText(d);
+  try {
+    localStorage.setItem(
+      "cgd_active_receipt",
+      JSON.stringify({
+        receiptText,
+        kitchenText,
+        autoPrintKitchen: withKitchen,
+        orderNumber: d.orderNumber,
+        printDataJson: JSON.stringify(d),
+        returnPath,
+        ts: Date.now(),
+      }),
+    );
+  } catch {
+    /* Safari private mode may block localStorage writes */
+  }
+}
 
 function generateOrderNumber() {
   const random = Math.floor(1000 + Math.random() * 9000);
@@ -267,15 +294,6 @@ export default function CheckoutPage() {
     setCartTotalSnapshot(0);
   };
 
-  const finishOrder = (delay = 400) => {
-    completingRef.current = true;
-    invalidateSnapshot();
-    setTimeout(() => {
-      clearCart();
-      router.push(isAdmin ? "/pos" : "/");
-    }, delay);
-  };
-
   // ── Option 1: Save Record Only (no print) ───────────────────────────────────
   const handleSaveOnly = async () => {
     setIsBusy(true);
@@ -354,25 +372,20 @@ export default function CheckoutPage() {
   };
 
   // ── Option 2: Print Only (no DB record) ─────────────────────────────────────
-  const handlePrintOnly = async () => {
-    setIsBusy(true);
-    try {
-      await runPrintFlow({ cashier: true, kitchen: withKitchenTicket });
-      setShowSummaryModal(false);
-      finishOrder(200);
-    } catch (error) {
-      toast.error("Print failed", {
-        description: describeError(
-          error,
-          "Printer not connected. Open Printer Setup to connect via Bluetooth.",
-        ),
-      });
-    } finally {
-      setIsBusy(false);
-    }
+  // Stores receipt data and navigates to the /receipt page where the cashier
+  // sees both previews and can trigger / retry printing from there.
+  const handlePrintOnly = () => {
+    storeReceiptData(printData, isAdmin ? "/pos" : "/", withKitchenTicket);
+    setShowSummaryModal(false);
+    completingRef.current = true;
+    invalidateSnapshot();
+    clearCart();
+    router.push("/receipt");
   };
 
   // ── Option 3: Print + Save ──────────────────────────────────────────────────
+  // Saves to DB then stores receipt data and navigates to the /receipt page.
+  // The /receipt page auto-prints via BLE (or RawBT fallback) on mount.
   const handlePrintAndSave = async () => {
     setIsBusy(true);
     try {
@@ -381,17 +394,12 @@ export default function CheckoutPage() {
         return;
       }
 
-      try {
-        await runPrintFlow({ cashier: true, kitchen: withKitchenTicket });
-      } catch (error) {
-        console.error("[CHECKOUT] print after save failed:", error);
-        toast.error("Order saved, but printing failed", {
-          description: `${orderNumber} was saved. You can reprint from Order History, or connect printers in Printer Setup.`,
-        });
-      }
-
+      storeReceiptData(printData, isAdmin ? "/pos" : "/", withKitchenTicket);
       setShowSummaryModal(false);
-      finishOrder(200);
+      completingRef.current = true;
+      invalidateSnapshot();
+      clearCart();
+      router.push("/receipt");
     } catch {
       // recordSale threw (e.g. STOCK_REJECTED — already toasted). Keep modal open.
     } finally {
@@ -721,7 +729,7 @@ export default function CheckoutPage() {
               className="text-sm cursor-pointer flex items-center gap-1.5"
             >
               <ChefHat className="h-3.5 w-3.5 text-orange-600" />
-              Also print kitchen ticket with save/finish actions
+              Also print kitchen ticket
             </Label>
           </div>
 
