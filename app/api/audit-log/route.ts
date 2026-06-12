@@ -77,7 +77,7 @@ export async function GET(request: Request) {
  *
  * Body variants:
  *   { id: number }                     → hard-delete a single row
- *   { deleteAll: true }                → hard-delete ALL non-archived rows
+ *   { deleteAll: true }                → hard-delete ONLY archived rows
  *   { archiveAll: true }               → set archived=true on ALL active rows
  */
 export async function DELETE(request: Request) {
@@ -116,8 +116,10 @@ export async function DELETE(request: Request) {
   // ── Delete All ─────────────────────────────────────────────────────────────
   if (body.deleteAll === true) {
     try {
+      const hasArchived = await hasColumn("admin_audit_log", "archived")
+      const whereClause = hasArchived ? "WHERE archived = true" : ""
       const result = await pool.query(
-        `DELETE FROM public.admin_audit_log RETURNING id`
+        `DELETE FROM public.admin_audit_log ${whereClause} RETURNING id`
       )
       return NextResponse.json({ success: true, deleted: result.rowCount ?? 0 })
     } catch (err) {
@@ -149,7 +151,7 @@ export async function DELETE(request: Request) {
 /**
  * PATCH /api/audit-log
  *
- * Body: { id: number }  → archive a single row (set archived=true)
+ * Body: { id: number, archived: boolean }  → archive or unarchive a single row
  */
 export async function PATCH(request: Request) {
   const session = await getServerSession(authOptions)
@@ -157,17 +159,19 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  let body: { id?: number }
+  let body: { id?: number, archived?: boolean }
   try {
     body = await request.json()
   } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 })
   }
 
-  const { id } = body
+  const { id, archived } = body
   if (!id || !Number.isFinite(id) || id <= 0) {
     return NextResponse.json({ error: "Invalid audit log ID" }, { status: 400 })
   }
+  // Default to true if archived not provided for backward compatibility
+  const targetArchived = archived ?? true
 
   const hasArchived = await hasColumn("admin_audit_log", "archived")
   if (!hasArchived) {
@@ -176,15 +180,15 @@ export async function PATCH(request: Request) {
 
   try {
     const result = await pool.query(
-      `UPDATE public.admin_audit_log SET archived = true WHERE id = $1 RETURNING id`,
-      [id]
+      `UPDATE public.admin_audit_log SET archived = $1 WHERE id = $2 RETURNING id`,
+      [targetArchived, id]
     )
     if (result.rows.length === 0) {
       return NextResponse.json({ error: "Audit log entry not found" }, { status: 404 })
     }
-    return NextResponse.json({ success: true, id })
+    return NextResponse.json({ success: true, id, archived: targetArchived })
   } catch (err) {
-    console.error("Failed to archive audit log entry:", err)
-    return NextResponse.json({ error: "Failed to archive audit log entry" }, { status: 500 })
+    console.error("Failed to update audit log entry:", err)
+    return NextResponse.json({ error: "Failed to update audit log entry" }, { status: 500 })
   }
 }

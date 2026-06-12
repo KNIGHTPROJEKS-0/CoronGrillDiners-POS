@@ -955,10 +955,33 @@ function DashboardSection({ data, selectedDate, onRefresh }: { data: SalesData |
 }
 
 function TrashSection({ orders, onRefresh }: { orders: TrashOrder[]; onRefresh: () => Promise<void> }) {
-  const [actionBusy, setActionBusy] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'orders' | 'logs'>('orders')
+  const [actionBusy, setActionBusy] = useState<string | number | null>(null)
   const [fetchError, setFetchError] = useState(false)
+  const [logEntries, setLogEntries] = useState<AuditEntry[]>([])
+  const [logsLoading, setLogsLoading] = useState(false)
 
-  const handleRestore = async (order: TrashOrder) => {
+  const fetchArchivedLogs = useCallback(async () => {
+    setLogsLoading(true)
+    setFetchError(false)
+    try {
+      const res = await fetch("/api/audit-log?includeArchived=true")
+      if (!res.ok) throw new Error()
+      const j = await res.json()
+      const archived = (j.entries ?? []).filter((e: AuditEntry) => e.archived)
+      setLogEntries(archived)
+    } catch {
+      setFetchError(true)
+    } finally {
+      setLogsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (activeTab === 'logs') fetchArchivedLogs()
+  }, [activeTab, fetchArchivedLogs])
+
+  const handleRestoreOrder = async (order: TrashOrder) => {
     if (!confirm(`Restore order ${order.order_number} from Trash?`)) return
     setActionBusy(order.id)
     try {
@@ -978,7 +1001,7 @@ function TrashSection({ orders, onRefresh }: { orders: TrashOrder[]; onRefresh: 
     }
   }
 
-  const handlePermanentDelete = async (order: TrashOrder) => {
+  const handlePermanentDeleteOrder = async (order: TrashOrder) => {
     if (!confirm(`Permanently delete order ${order.order_number}? This cannot be undone.`)) return
     setActionBusy(order.id)
     try {
@@ -994,7 +1017,47 @@ function TrashSection({ orders, onRefresh }: { orders: TrashOrder[]; onRefresh: 
     }
   }
 
-  if (orders.length === 0 && fetchError) {
+  const handleRestoreLog = async (entry: AuditEntry) => {
+    if (!confirm("Restore this log entry to the active Activity Log?")) return
+    setActionBusy(entry.id)
+    try {
+      const res = await fetch("/api/audit-log", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: entry.id, archived: false }),
+      })
+      if (res.ok) {
+        await fetchArchivedLogs()
+        toast.success("Log entry restored.")
+      }
+    } catch {
+      toast.error("Could not restore log entry.")
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  const handlePermanentDeleteLog = async (entry: AuditEntry) => {
+    if (!confirm("Permanently delete this log entry? This cannot be undone.")) return
+    setActionBusy(entry.id)
+    try {
+      const res = await fetch("/api/audit-log", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: entry.id }),
+      })
+      if (res.ok) {
+        await fetchArchivedLogs()
+        toast.success("Log entry permanently deleted.")
+      }
+    } catch {
+      toast.error("Could not delete log entry.")
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  if (orders.length === 0 && activeTab === 'orders' && fetchError) {
     return (
       <div className="flex items-center justify-center py-32">
         <div className="text-center max-w-sm">
@@ -1017,60 +1080,161 @@ function TrashSection({ orders, onRefresh }: { orders: TrashOrder[]; onRefresh: 
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 className="font-semibold">Trash</h2>
-            <p className="text-xs text-muted-foreground mt-1">Deleted orders are kept here until permanently removed.</p>
+            <p className="text-xs text-muted-foreground mt-1">Deleted orders and archived logs.</p>
           </div>
-          <Button size="sm" variant="outline" onClick={() => onRefresh().catch(() => setFetchError(true))}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              if (activeTab === 'orders') {
+                onRefresh().catch(() => setFetchError(true))
+              } else {
+                fetchArchivedLogs()
+              }
+            }}
+          >
             <RefreshCw className="h-4 w-4 mr-2" /> Refresh
           </Button>
         </div>
+        {/* Tabs */}
+        <div className="flex gap-2 mt-4">
+          <button
+            onClick={() => setActiveTab('orders')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'orders' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            Deleted Orders
+          </button>
+          <button
+            onClick={() => setActiveTab('logs')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'logs' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            System Logs Archive
+          </button>
+        </div>
       </div>
 
-      {orders.length === 0 ? (
-        <EmptyState icon={Trash2} message="No deleted orders in the trash." />
-      ) : (
-        <div className="bg-white rounded-xl border shadow-sm divide-y">
-          {orders.map((order) => {
-            const isBusy = actionBusy === order.id
-            return (
-              <div key={order.id} className="px-5 py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <span className="font-mono text-sm font-semibold">{order.order_number}</span>
-                    <span className="text-[10px] uppercase tracking-wide text-white bg-red-600 rounded-full px-2 py-1">Deleted</span>
+      {activeTab === 'orders' && (
+        orders.length === 0 ? (
+          <EmptyState icon={Trash2} message="No deleted orders in the trash." />
+        ) : (
+          <div className="bg-white rounded-xl border shadow-sm divide-y">
+            {orders.map((order) => {
+              const isBusy = actionBusy === order.id
+              return (
+                <div key={order.id} className="px-5 py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <span className="font-mono text-sm font-semibold">{order.order_number}</span>
+                      <span className="text-[10px] uppercase tracking-wide text-white bg-red-600 rounded-full px-2 py-1">Deleted</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{fmtTime(order.created_at)} · {order.created_by || order.server_name}</p>
+                    <p className="text-xs text-gray-500 mt-1 truncate max-w-lg">
+                      {order.items?.map((it, i) => `${it.quantity}× ${it.name}`).join(", ")}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Deleted by {order.deleted_by ?? "admin"} · {order.deleted_at ? new Date(order.deleted_at).toLocaleString("en-PH") : "unknown"}
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">{fmtTime(order.created_at)} · {order.created_by || order.server_name}</p>
-                  <p className="text-xs text-gray-500 mt-1 truncate max-w-lg">
-                    {order.items?.map((it, i) => `${it.quantity}× ${it.name}`).join(", ")}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    Deleted by {order.deleted_by ?? "admin"} · {order.deleted_at ? new Date(order.deleted_at).toLocaleString("en-PH") : "unknown"}
-                  </p>
+                  <div className="flex gap-2 flex-wrap justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 gap-1"
+                      onClick={() => handleRestoreOrder(order)}
+                      disabled={isBusy}
+                    >
+                      {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArchiveRestore className="h-3 w-3" />}
+                      Restore
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="h-9 gap-1"
+                      onClick={() => handlePermanentDeleteOrder(order)}
+                      disabled={isBusy}
+                    >
+                      <Trash2 className="h-3 w-3" /> Permanently Delete
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex gap-2 flex-wrap justify-end">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-9 gap-1"
-                    onClick={() => handleRestore(order)}
-                    disabled={isBusy}
-                  >
-                    {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArchiveRestore className="h-3 w-3" />}
-                    Restore
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="h-9 gap-1"
-                    onClick={() => handlePermanentDelete(order)}
-                    disabled={isBusy}
-                  >
-                    <Trash2 className="h-3 w-3" /> Permanently Delete
-                  </Button>
+              )
+            })}
+          </div>
+        )
+      )}
+
+      {activeTab === 'logs' && (
+        logsLoading ? (
+          <div className="flex items-center justify-center py-32">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : logEntries.length === 0 ? (
+          <EmptyState icon={Archive} message="No archived logs in the trash." />
+        ) : (
+          <div className="bg-white rounded-xl border shadow-sm divide-y">
+            {logEntries.map((entry) => {
+              const meta = ACTION_META[entry.action] ?? { label: entry.action, icon: History, color: "text-gray-600 bg-gray-50" }
+              const Icon = meta.icon
+              const isBusy = actionBusy === entry.id
+              return (
+                <div key={entry.id} className="px-5 py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-4 min-w-0">
+                    <div className={`mt-0.5 flex-shrink-0 h-8 w-8 rounded-full flex items-center justify-center ${meta.color}`}>
+                      <Icon className="h-4 w-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-sm">{meta.label}</span>
+                        {entry.target_username && (
+                          <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-mono">
+                            @{entry.target_username}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5 break-words">{entry.details}</p>
+                      <div className="flex gap-4 mt-1 flex-wrap">
+                        <p className="text-xs text-muted-foreground">
+                          by <span className="font-medium text-foreground">@{entry.actor_username}</span>
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(entry.created_at).toLocaleString("en-PH", {
+                            month: "long", day: "numeric", year: "numeric",
+                            hour: "2-digit", minute: "2-digit", hour12: true,
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 flex-wrap justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 gap-1"
+                      onClick={() => handleRestoreLog(entry)}
+                      disabled={isBusy}
+                    >
+                      {isBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArchiveRestore className="h-3 w-3" />}
+                      Restore
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="h-9 gap-1"
+                      onClick={() => handlePermanentDeleteLog(entry)}
+                      disabled={isBusy}
+                    >
+                      <Trash2 className="h-3 w-3" /> Permanently Delete
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            )
-          })}
-        </div>
+              )
+            })}
+          </div>
+        )
       )}
     </div>
   )
@@ -1676,14 +1840,14 @@ function AuditLogSection({ entries, onRefresh }: { entries: AuditEntry[], onRefr
     }
   }
 
-  // ── Bulk: permanently delete all entries ──────────────────────────────────
+  // ── Bulk: permanently delete all archived entries ───────────────────────────
   const handleDeleteAll = async () => {
     const confirmed = window.confirm(
-      `⚠️ PERMANENTLY DELETE ALL LOG HISTORY?\n\nThis will wipe all ${entries.length} entries from the database.\nThis action cannot be undone.\n\nType OK to confirm.`
+      `⚠️ PERMANENTLY DELETE ALL ARCHIVED LOG ENTRIES?\n\nThis will wipe all archived entries only; active logs will remain.\nThis action cannot be undone.\n\nType OK to confirm.`
     )
     if (!confirmed) return
     // Second confirmation for destructive action
-    if (!window.confirm("Final confirmation: delete the entire activity log permanently?")) return
+    if (!window.confirm("Final confirmation: delete all archived activity log entries permanently?")) return
     setBulkBusy("delete-all")
     try {
       const res = await fetch("/api/audit-log", {
@@ -1733,19 +1897,19 @@ function AuditLogSection({ entries, onRefresh }: { entries: AuditEntry[], onRefr
                 : <Archive className="h-3 w-3" />}
               Archive All
             </Button>
-            {/* Delete All */}
+            {/* Delete All (only archived) */}
             <Button
               variant="outline"
               size="sm"
               className="h-7 gap-1.5 text-xs text-red-700 border-red-200 hover:bg-red-50"
               onClick={handleDeleteAll}
               disabled={entries.length === 0 || bulkBusy !== null}
-              title="Permanently delete all log history — cannot be undone"
+              title="Permanently delete all ARCHIVED log entries only — active logs are safe"
             >
               {bulkBusy === "delete-all"
                 ? <RefreshCw className="h-3 w-3 animate-spin" />
                 : <Trash2 className="h-3 w-3" />}
-              Delete All
+              Delete Archived
             </Button>
           </div>
         </div>
