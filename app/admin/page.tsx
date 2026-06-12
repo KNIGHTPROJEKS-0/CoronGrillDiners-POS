@@ -261,7 +261,7 @@ export default function AdminPage() {
     router.prefetch("/pos")
   }, [router])
 
-  // ── New-order notifications (poll every 15 s while admin is signed in) ────
+  // ── New-order notifications (poll every 30 s while admin is signed in and page is visible) ────
   // Tracks the latest order id we've already notified the admin about so we
   // don't re-toast the same order on every poll. Uses localStorage to persist
   // across page refreshes and depends on selectedDate to avoid cross-date issues.
@@ -279,6 +279,9 @@ export default function AdminPage() {
     let cancelled = false
 
     const poll = async () => {
+      // Only poll when page is visible
+      if (document.visibilityState !== 'visible') return
+      
       try {
         const res = await fetch(`/api/sales?date=${today}`)
         if (!res.ok || cancelled) return
@@ -326,7 +329,7 @@ export default function AdminPage() {
     }
 
     poll()
-    const interval = setInterval(poll, 15000)
+    const interval = setInterval(poll, 30000) // 30 seconds instead of 15!
     return () => { cancelled = true; clearInterval(interval) }
   }, [status, isAdmin, selectedDate])
 
