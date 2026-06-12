@@ -50,6 +50,11 @@ export async function GET(request: Request) {
     return NextResponse.json({
       weeklyTrend: weeklyTrend.rows,
       topItems: topItems.rows,
+    }, {
+      status: 200,
+      headers: {
+        'Cache-Control': 's-maxage=60, stale-while-revalidate=120',
+      },
     })
   } catch (error) {
     console.error("Failed to fetch analytics:", error)

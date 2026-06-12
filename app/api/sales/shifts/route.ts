@@ -83,7 +83,12 @@ export async function GET(request: Request) {
       [from, to],
     );
 
-    return NextResponse.json({ shifts: result.rows, from, to });
+    return NextResponse.json({ shifts: result.rows, from, to }, {
+      status: 200,
+      headers: {
+        'Cache-Control': 's-maxage=15, stale-while-revalidate=30',
+      },
+    });
   } catch (error) {
     console.error("Failed to fetch sales shifts:", error);
     return NextResponse.json(

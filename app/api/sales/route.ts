@@ -610,6 +610,11 @@ export async function GET(request: Request) {
       stats: safeDailyStats.rows[0],
       paymentBreakdown: safePaymentBreakdown.rows,
       recentOrders: safeRecentOrders.rows,
+    }, {
+      status: 200,
+      headers: {
+        'Cache-Control': 's-maxage=5, stale-while-revalidate=10',
+      },
     });
   } catch (error) {
     console.error("Failed to fetch sales:", error);
