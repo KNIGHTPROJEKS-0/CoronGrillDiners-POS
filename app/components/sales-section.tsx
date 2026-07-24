@@ -374,8 +374,7 @@ export default function SalesSection() {
   const today = new Date().toLocaleDateString("en-CA", {
     timeZone: "Asia/Manila",
   });
-  const defaultFrom = "2026-06-03";
-  const [dateFrom, setDateFrom] = useState(defaultFrom);
+  const [dateFrom, setDateFrom] = useState(today);
   const [dateTo, setDateTo] = useState(today);
   const [shifts, setShifts] = useState<ShiftWithStats[]>([]);
   const [loading, setLoading] = useState(false);

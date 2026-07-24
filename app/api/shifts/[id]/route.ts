@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import pool from "@/lib/db"
 import { logEvent } from "@/lib/audit"
+import { revalidateTag } from "next/cache"
 
 export async function PATCH(
   request: Request,
@@ -117,6 +118,11 @@ export async function DELETE(
 
     await client.query(`DELETE FROM public.shifts WHERE id = $1`, [id])
     await client.query("COMMIT")
+
+    // Invalidate caches to ensure Sales Summary and Dashboard reflect the deletion
+    revalidateTag("sales")
+    revalidateTag("dashboard-sales")
+    revalidateTag("shifts")
 
     // Log deletion of shift
     try {

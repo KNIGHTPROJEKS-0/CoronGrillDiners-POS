@@ -494,7 +494,7 @@ export default function ShiftCloseModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-md">
         <DialogHeader>
           <div className="flex items-center justify-center mb-2">
             <div className="h-14 w-14 rounded-full bg-orange-100 flex items-center justify-center">
@@ -502,13 +502,13 @@ export default function ShiftCloseModal({
             </div>
           </div>
           <DialogTitle className="text-center">Close Shift</DialogTitle>
-          <DialogDescription className="text-center text-xs">
+          <DialogDescription className="text-center text-xs mb-4">
             Started at {formatTime(shift.start_time)} · Count your drawer and
             enter the actual cash.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-1.5 text-sm bg-muted/40 rounded-lg p-3 mt-2">
+        <div className="space-y-1.5 text-sm bg-muted/40 rounded-lg p-3">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Starting Cash</span>
             <span className="font-mono">{fmt(shift.start_balance)}</span>
@@ -525,8 +525,8 @@ export default function ShiftCloseModal({
           ) : null}
         </div>
 
-        <form onSubmit={handleClose} className="space-y-3 mt-1">
-          <div className="space-y-1.5">
+        <form onSubmit={handleClose} className="space-y-4">
+          <div className="space-y-2">
             <Label htmlFor="actualCash">Actual Cash in Drawer (₱)</Label>
             <Input
               id="actualCash"
@@ -542,7 +542,7 @@ export default function ShiftCloseModal({
               autoFocus
               required
               disabled={isLoading}
-              className="text-lg font-mono"
+              className="text-lg font-mono text-right"
             />
           </div>
 
@@ -572,11 +572,11 @@ export default function ShiftCloseModal({
             </p>
           )}
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               variant="outline"
-              className="flex-1"
+              className="flex-1 min-w-[100px]"
               onClick={() => onOpenChange(false)}
               disabled={isLoading}
             >
@@ -585,7 +585,7 @@ export default function ShiftCloseModal({
             <Button
               type="button"
               variant="outline"
-              className="flex-1"
+              className="flex-1 min-w-[140px]"
               onClick={handleVerifyCount}
               disabled={isLoading || actualCash === ""}
             >
@@ -593,7 +593,7 @@ export default function ShiftCloseModal({
             </Button>
             <Button
               type="submit"
-              className="flex-1 bg-orange-600 hover:bg-orange-700"
+              className="flex-1 min-w-[120px] bg-orange-600 hover:bg-orange-700"
               disabled={isLoading || !isSubmitted}
             >
               {isLoading ? (
