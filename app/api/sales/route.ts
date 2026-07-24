@@ -7,7 +7,7 @@ import pool, {
   makeDeletedFilter,
 } from "@/lib/db";
 import { logEvent } from "@/lib/audit";
-import { revalidateTag } from "next/cache";
+import { revalidateTag, unstable_cache } from "next/cache";
 
 // Helper function to add missing columns to sales table
 async function ensureSalesTableColumns() {
@@ -61,6 +61,126 @@ const shiftSalesCache = new Map<
   }
 >();
 const ACTIVE_SHIFT_CACHE_MS = 25 * 1000;
+
+const getSalesForAdminCached = unstable_cache(
+  async (date: string, shiftId: number | null, deleted: boolean, isVoid: boolean) => {
+    const hasIsDeleted = await hasColumn("sales", "is_deleted");
+    const hasDeletedAt = await hasColumn("sales", "deleted_at");
+    const hasDeletedBy = await hasColumn("sales", "deleted_by");
+    const deletedFilter = makeDeletedFilter(hasIsDeleted, deleted);
+    const deletedFilterS = makeDeletedFilter(hasIsDeleted, deleted, "s");
+    const deletedColumns = makeDeletedColumns(hasDeletedAt, hasDeletedBy, "s");
+    const deletedSelect = deletedColumns ? `, ${deletedColumns}` : "";
+    const voidFilter = isVoid ? "AND COALESCE(s.status, 'completed') = 'void'" : "";
+
+    let dailyStats: { rows: any[] } | undefined;
+    let paymentBreakdown: { rows: any[] } | undefined;
+    let recentOrders: { rows: any[] } | undefined;
+
+    if (shiftId) {
+      const shiftRow = await fetchShiftWindow(shiftId);
+      if (shiftRow) {
+        const shiftWindow = {
+          start: shiftRow.start_time,
+          end: shiftRow.end_time ?? null,
+        };
+        const cashierLookup =
+          shiftRow.cashier_username ?? shiftRow.cashier_name ?? "";
+        const isPermanent = !!shiftRow.end_time;
+        const cached = await getCachedShiftSales(
+          shiftId,
+          deleted,
+          isVoid,
+          isPermanent,
+          shiftWindow,
+          cashierLookup,
+        );
+        dailyStats = { rows: [cached.dailyStats] };
+        paymentBreakdown = { rows: cached.paymentBreakdown };
+        recentOrders = { rows: cached.recentOrders };
+      }
+    }
+
+    if (!dailyStats) {
+      [dailyStats, paymentBreakdown, recentOrders] = await Promise.all([
+        pool.query(
+          `SELECT
+             COUNT(*)::int AS total_orders,
+             COUNT(*) FILTER (WHERE COALESCE(status, 'completed') = 'completed')::int AS completed_orders,
+             COALESCE(SUM(grand_total) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_sales,
+             COALESCE(SUM(subtotal) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_subtotal,
+             COALESCE(SUM(service_charge) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_service_charge
+           FROM public.sales
+           WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1::date
+             ${deletedFilter}
+             ${voidFilter}`,
+          [date],
+        ),
+        pool.query(
+          `SELECT
+             payment_method,
+             COUNT(*)::int AS count,
+             COALESCE(SUM(grand_total), 0)::float AS total
+           FROM public.sales
+           WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1::date
+             AND COALESCE(status, 'completed') = 'completed'
+             ${deletedFilter}
+             ${voidFilter}
+           GROUP BY payment_method
+           ORDER BY total DESC`,
+          [date],
+        ),
+        pool.query(
+          `SELECT
+             s.id, s.order_number, s.items,
+             s.subtotal::float, s.service_charge::float, s.grand_total::float,
+             COALESCE(s.discount_percent, 0)::int AS discount_percent,
+             s.payment_method, s.server_name, s.created_by,
+             COALESCE(s.status, 'completed') AS status,
+             s.void_reason, s.created_at,
+             sh.start_time AS shift_start_time,
+             vl.void_code_used${deletedSelect}
+           FROM public.sales s
+           LEFT JOIN public.shifts sh ON s.shift_id = sh.id
+           LEFT JOIN public.void_log vl ON vl.sale_id = s.id
+           WHERE DATE(s.created_at AT TIME ZONE 'Asia/Manila') = $1::date
+             ${deletedFilterS}
+             ${voidFilter}
+           ORDER BY s.created_at DESC
+           LIMIT 50`,
+          [date],
+        ),
+      ]);
+
+      if (recentOrders) {
+        recentOrders = { rows: recentOrders.rows.map(addOvernightFields) };
+      }
+    }
+
+    const safeDailyStats = dailyStats ?? {
+      rows: [
+        {
+          total_orders: 0,
+          completed_orders: 0,
+          total_sales: 0,
+          total_subtotal: 0,
+          total_service_charge: 0,
+        },
+      ],
+    };
+    const safePaymentBreakdown = paymentBreakdown ?? { rows: [] };
+    const safeRecentOrders = recentOrders ?? { rows: [] };
+
+    return {
+      date,
+      stats: safeDailyStats.rows[0],
+      paymentBreakdown: safePaymentBreakdown.rows,
+      recentOrders: safeRecentOrders.rows,
+    };
+  },
+  ["api-sales"],
+  { revalidate: 30, tags: ["sales", "dashboard-sales"] },
+);
 
 async function fetchShiftWindow(shiftId: number) {
   const shiftRes = await pool.query(
@@ -463,6 +583,9 @@ export async function POST(request: Request) {
       `Order ${orderNumber} placed — ₱${Number(grandTotal).toFixed(2)} via ${paymentMethod}. Items: ${itemSummary}`,
     );
 
+    revalidateTag("sales");
+    revalidateTag("dashboard-sales");
+
     return NextResponse.json({ success: true, sale });
   } catch (error) {
     console.error("[SALES API] Failed to record sale:", error);
@@ -510,121 +633,18 @@ export async function GET(request: Request) {
     }
     const deleted = searchParams.get("deleted") === "true";
     const isVoid = searchParams.get("void") === "true";
-    const hasIsDeleted = await hasColumn("sales", "is_deleted");
-    const hasDeletedAt = await hasColumn("sales", "deleted_at");
-    const hasDeletedBy = await hasColumn("sales", "deleted_by");
-    const deletedFilter = makeDeletedFilter(hasIsDeleted, deleted);
-    const deletedFilterS = makeDeletedFilter(hasIsDeleted, deleted, "s");
-    const deletedColumns = makeDeletedColumns(hasDeletedAt, hasDeletedBy, "s");
-    const deletedSelect = deletedColumns ? `, ${deletedColumns}` : "";
-    const voidFilter = isVoid ? "AND COALESCE(s.status, 'completed') = 'void'" : "";
     console.log("[SALES/GET] Admin fetching sales for date:", date, {
       deleted,
       isVoid,
       shiftId,
     });
-
-    let dailyStats: { rows: any[] } | undefined;
-    let paymentBreakdown: { rows: any[] } | undefined;
-    let recentOrders: { rows: any[] } | undefined;
-    if (shiftId) {
-      const shiftRow = await fetchShiftWindow(shiftId);
-      if (shiftRow) {
-        const shiftWindow = {
-          start: shiftRow.start_time,
-          end: shiftRow.end_time ?? null,
-        };
-        const cashierLookup =
-          shiftRow.cashier_username ?? shiftRow.cashier_name ?? "";
-        const isPermanent = !!shiftRow.end_time;
-        const cached = await getCachedShiftSales(
-          shiftId,
-          deleted,
-          isVoid,
-          isPermanent,
-          shiftWindow,
-          cashierLookup,
-        );
-        dailyStats = { rows: [cached.dailyStats] };
-        paymentBreakdown = { rows: cached.paymentBreakdown };
-        recentOrders = { rows: cached.recentOrders };
-      }
-    }
-
-    if (!dailyStats) {
-      [dailyStats, paymentBreakdown, recentOrders] = await Promise.all([
-        pool.query(
-          `SELECT
-             COUNT(*)::int AS total_orders,
-             COUNT(*) FILTER (WHERE COALESCE(status, 'completed') = 'completed')::int AS completed_orders,
-             COALESCE(SUM(grand_total) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_sales,
-             COALESCE(SUM(subtotal) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_subtotal,
-             COALESCE(SUM(service_charge) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_service_charge
-           FROM public.sales
-           WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1::date
-             ${deletedFilter}
-             ${voidFilter}`,
-          [date],
-        ),
-        pool.query(
-          `SELECT
-             payment_method,
-             COUNT(*)::int AS count,
-             COALESCE(SUM(grand_total), 0)::float AS total
-           FROM public.sales
-           WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1::date
-             AND COALESCE(status, 'completed') = 'completed'
-             ${deletedFilter}
-             ${voidFilter}
-           GROUP BY payment_method
-           ORDER BY total DESC`,
-          [date],
-        ),
-        pool.query(
-          `SELECT
-             s.id, s.order_number, s.items,
-             s.subtotal::float, s.service_charge::float, s.grand_total::float,
-             COALESCE(s.discount_percent, 0)::int AS discount_percent,
-             s.payment_method, s.server_name, s.created_by,
-             COALESCE(s.status, 'completed') AS status,
-             s.void_reason, s.created_at,
-             sh.start_time AS shift_start_time,
-             vl.void_code_used${deletedSelect}
-           FROM public.sales s
-           LEFT JOIN public.shifts sh ON s.shift_id = sh.id
-           LEFT JOIN public.void_log vl ON vl.sale_id = s.id
-           WHERE DATE(s.created_at AT TIME ZONE 'Asia/Manila') = $1::date
-             ${deletedFilterS}
-             ${voidFilter}
-           ORDER BY s.created_at DESC
-           LIMIT 50`,
-          [date],
-        ),
-      ]);
-      // Map recentOrders to add overnight fields
-      if (recentOrders) {
-        recentOrders = { rows: recentOrders.rows.map(addOvernightFields) };
-      }
-    }
-    const safeDailyStats = dailyStats ?? {
-      rows: [
-        {
-          total_orders: 0,
-          completed_orders: 0,
-          total_sales: 0,
-          total_subtotal: 0,
-          total_service_charge: 0,
-        },
-      ],
-    };
-    const safePaymentBreakdown = paymentBreakdown ?? { rows: [] };
-    const safeRecentOrders = recentOrders ?? { rows: [] };
+    const data = await getSalesForAdminCached(date, shiftId, deleted, isVoid);
 
     console.log("[SALES/GET] Admin query results:", {
-      totalOrders: safeDailyStats.rows[0]?.total_orders,
-      completedOrders: safeDailyStats.rows[0]?.completed_orders,
-      recentOrdersCount: safeRecentOrders.rows.length,
-      recentOrders: safeRecentOrders.rows.map((o: any) => ({
+      totalOrders: data.stats?.total_orders,
+      completedOrders: data.stats?.completed_orders,
+      recentOrdersCount: data.recentOrders.length,
+      recentOrders: data.recentOrders.map((o: any) => ({
         id: o.id,
         order_number: o.order_number,
         created_by: o.created_by,
@@ -632,15 +652,10 @@ export async function GET(request: Request) {
       })),
     });
 
-    return NextResponse.json({
-      date,
-      stats: safeDailyStats.rows[0],
-      paymentBreakdown: safePaymentBreakdown.rows,
-      recentOrders: safeRecentOrders.rows,
-    }, {
+    return NextResponse.json(data, {
       status: 200,
       headers: {
-        'Cache-Control': 's-maxage=5, stale-while-revalidate=10',
+        'Cache-Control': 's-maxage=30, stale-while-revalidate=60',
       },
     });
   } catch (error) {

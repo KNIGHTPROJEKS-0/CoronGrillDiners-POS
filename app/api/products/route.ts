@@ -3,11 +3,10 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import pool, { hasColumn } from "@/lib/db"
 import { logEvent } from "@/lib/audit"
-import { revalidateTag } from "next/cache"
+import { revalidateTag, unstable_cache } from "next/cache"
 
-export async function GET() {
-  try {
-    // Add missing columns
+const getProductsCached = unstable_cache(
+  async () => {
     const client = await pool.connect()
     try {
       await client.query(`
@@ -21,11 +20,9 @@ export async function GET() {
       client.release()
     }
 
-    // Check if stock column exists
     const hasStock = await hasColumn("products", "stock")
     const hasIsDeleted = await hasColumn("products", "is_deleted")
 
-    // Build SELECT clause dynamically
     const selectColumns = [
       "id", "name", "price::float", "category", "image_url AS image", "description", "available"
     ]
@@ -39,8 +36,16 @@ export async function GET() {
        ${whereClause}
        ORDER BY category, name ASC`
     )
-    
-    return NextResponse.json(result.rows, {
+    return result.rows
+  },
+  ["api-products"],
+  { revalidate: 300, tags: ["products", "menu"] }
+)
+
+export async function GET() {
+  try {
+    const rows = await getProductsCached()
+    return NextResponse.json(rows, {
       headers: {
         'Cache-Control': 's-maxage=300, stale-while-revalidate=60',
       },
@@ -94,6 +99,7 @@ export async function POST(request: Request) {
     
     // Invalidate product cache
     revalidateTag("products")
+    revalidateTag("menu")
 
     return NextResponse.json({ product })
   } catch (error) {
@@ -182,6 +188,7 @@ export async function PUT(request: Request) {
     
     // Invalidate product cache
     revalidateTag("products")
+    revalidateTag("menu")
 
     return NextResponse.json({ product })
   } catch (error) {
@@ -229,6 +236,7 @@ export async function DELETE(request: Request) {
     
     // Invalidate product cache
     revalidateTag("products")
+    revalidateTag("menu")
 
     return NextResponse.json({ success: true })
   } catch (error) {

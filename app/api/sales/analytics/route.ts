@@ -2,17 +2,10 @@ import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import pool, { hasColumn, makeDeletedFilter } from "@/lib/db"
+import { unstable_cache } from "next/cache"
 
-export async function GET(request: Request) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user || session.user.role !== "admin") {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  try {
-    const { searchParams } = new URL(request.url)
-    const date = searchParams.get("date") || new Date().toISOString().split("T")[0]
-
+const getAnalyticsCached = unstable_cache(
+  async (date: string) => {
     const hasIsDeleted = await hasColumn("sales", "is_deleted")
     const deletedFilter = makeDeletedFilter(hasIsDeleted, false)
 
@@ -47,13 +40,29 @@ export async function GET(request: Request) {
       ),
     ])
 
-    return NextResponse.json({
+    return {
       weeklyTrend: weeklyTrend.rows,
       topItems: topItems.rows,
-    }, {
+    }
+  },
+  ["api-dashboard-sales"],
+  { revalidate: 30, tags: ["dashboard-sales"] }
+)
+
+export async function GET(request: Request) {
+  const session = await getServerSession(authOptions)
+  if (!session?.user || session.user.role !== "admin") {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  try {
+    const { searchParams } = new URL(request.url)
+    const date = searchParams.get("date") || new Date().toISOString().split("T")[0]
+    const data = await getAnalyticsCached(date)
+    return NextResponse.json(data, {
       status: 200,
       headers: {
-        'Cache-Control': 's-maxage=60, stale-while-revalidate=120',
+        'Cache-Control': 's-maxage=30, stale-while-revalidate=60',
       },
     })
   } catch (error) {

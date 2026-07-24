@@ -3,14 +3,23 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import pool from "@/lib/db"
 import { logEvent } from "@/lib/audit"
-import { revalidateTag } from "next/cache"
+import { revalidateTag, unstable_cache } from "next/cache"
 
-export async function GET() {
-  try {
+const getCategoriesCached = unstable_cache(
+  async () => {
     const result = await pool.query(
       `SELECT id, name, display_order FROM public.categories ORDER BY display_order ASC, name ASC`
     )
-    return NextResponse.json(result.rows, {
+    return result.rows
+  },
+  ["api-categories"],
+  { revalidate: 300, tags: ["categories", "menu"] }
+)
+
+export async function GET() {
+  try {
+    const rows = await getCategoriesCached()
+    return NextResponse.json(rows, {
       headers: {
         'Cache-Control': 's-maxage=300, stale-while-revalidate=60',
       },
@@ -46,6 +55,7 @@ export async function POST(request: Request) {
     
     // Invalidate category cache
     revalidateTag("categories")
+    revalidateTag("menu")
 
     return NextResponse.json({ category: result.rows[0] })
   } catch (error) {
@@ -80,6 +90,7 @@ export async function PUT(request: Request) {
     
     // Invalidate category cache
     revalidateTag("categories")
+    revalidateTag("menu")
 
     return NextResponse.json({ category: result.rows[0] })
   } catch (error) {
@@ -115,6 +126,7 @@ export async function DELETE(request: Request) {
     
     // Invalidate category cache
     revalidateTag("categories")
+    revalidateTag("menu")
 
     return NextResponse.json({ success: true })
   } catch (error) {

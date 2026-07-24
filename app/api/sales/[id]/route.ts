@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import pool, { hasColumn } from "@/lib/db"
 import { logEvent } from "@/lib/audit"
+import { revalidateTag } from "next/cache"
 
 // Helper function to add missing columns to sales table
 async function ensureSalesTableColumns() {
@@ -164,6 +165,8 @@ export async function PATCH(
           `Order ${sale.order_number} restored from trash by ${username}`
         )
       }
+      revalidateTag("sales")
+      revalidateTag("dashboard-sales")
       return NextResponse.json({ sale })
     }
 
@@ -328,6 +331,8 @@ export async function PATCH(
         logEvent("order_voided", actor, `Order ${sale.order_number} cancelled. Reason: ${storedVoidReason ?? "none"}`)
       }
 
+      revalidateTag("sales")
+      revalidateTag("dashboard-sales")
       return NextResponse.json({ sale })
     } catch (err) {
       console.error("Transaction error while updating sale:", err)
@@ -374,6 +379,8 @@ export async function DELETE(
         `Order ${sale.order_number} permanently deleted (₱${Number(sale.grand_total).toFixed(2)})`
       )
 
+      revalidateTag("sales")
+      revalidateTag("dashboard-sales")
       return NextResponse.json({ success: true, deleted: sale })
     }
 
@@ -423,6 +430,8 @@ export async function DELETE(
       `Order ${sale.order_number} moved to trash by ${username}`
     )
 
+    revalidateTag("sales")
+    revalidateTag("dashboard-sales")
     return NextResponse.json({ success: true, deleted: sale })
   } catch (error) {
     console.error("Failed to delete sale:", error)
