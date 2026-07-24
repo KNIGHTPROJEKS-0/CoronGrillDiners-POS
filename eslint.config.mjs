@@ -26,6 +26,7 @@ const config = [
       "node_modules/**",
       "lib/generated/**",   // Prisma-generated client — never lint this
       "public/**",
+      "scripts/**",        // Script files — we don't need to lint these
       "*.config.ts",         // tailwind.config.ts, postcss.config.ts etc.
       "prisma.config.ts",    // Prisma config — has intentional type workaround
     ],
@@ -59,6 +60,8 @@ const config = [
       // ── React ───────────────────────────────────────────────────────────
       // Next.js 13+ App Router doesn't need React in scope
       "react/react-in-jsx-scope": "off",
+      // Disable react/display-name to avoid contextOrFilename.getFilename is not a function error
+      "react/display-name": "off",
 
       // ── React Compiler rules — disabled project-wide ────────────────────
       // eslint-config-next v16 ships with React Compiler lint rules that flag
