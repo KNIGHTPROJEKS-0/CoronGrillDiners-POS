@@ -191,6 +191,9 @@ export default function ProductGrid({ category, searchQuery }: ProductGridProps)
                 alt={product.name}
                 fill
                 className={`object-cover ${isOutOfStock ? "grayscale" : ""}`}
+                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                quality={80}
+                priority={false}
               />
               {isOutOfStock && (
                 <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/55 backdrop-blur-[1px] pointer-events-none">

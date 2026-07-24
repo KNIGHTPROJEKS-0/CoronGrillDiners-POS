@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { Minus, Plus, ShoppingCart, Trash2 } from "lucide-react"
 
@@ -37,8 +38,16 @@ export default function CartSidebar() {
           <div className="space-y-4">
             {cart.map((item) => (
               <div key={item.id} className="flex gap-3">
-                <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-md border">
-                  <img src={item.image || "/placeholder.svg"} alt={item.name} className="h-full w-full object-cover" />
+                <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-md border relative">
+                  <Image 
+                    src={item.image || "/placeholder.svg"} 
+                    alt={item.name} 
+                    fill
+                    className="object-cover"
+                    sizes="64px"
+                    quality={80}
+                    priority={false}
+                  />
                 </div>
                 <div className="flex flex-1 flex-col">
                   <div className="flex justify-between">
