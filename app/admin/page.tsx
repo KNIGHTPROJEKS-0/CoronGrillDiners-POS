@@ -87,6 +87,7 @@ interface AuditEntry {
   target_username: string | null
   details: string
   created_at: string
+  archived?: boolean
 }
 interface VoidCodeRow {
   id: number
