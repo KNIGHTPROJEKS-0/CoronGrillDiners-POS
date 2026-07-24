@@ -194,6 +194,14 @@ export default function CheckoutPage() {
     change,
   };
 
+  // Minimal payload for API - only essential fields
+  const apiItems = cartSnapshot.map((i) => ({
+    id: i.id,
+    name: i.name,
+    price: i.price,
+    quantity: i.quantity,
+  }));
+
   type RecordSaleResult = {
     savedToDb: boolean;
     alreadySaved?: boolean;
@@ -207,7 +215,7 @@ export default function CheckoutPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           orderNumber,
-          items: printData.items,
+          items: apiItems,
           subtotal: cartTotalSnapshot,
           serviceCharge: discountAmount,
           discountPercent: seniorDiscount,
@@ -260,7 +268,7 @@ export default function CheckoutPage() {
       if (err instanceof Error && err.message === "STOCK_REJECTED") throw err;
       savePendingSale({
         orderNumber,
-        items: printData.items,
+        items: apiItems,
         subtotal: cartTotalSnapshot,
         serviceCharge: discountAmount,
         discountPercent: seniorDiscount,
