@@ -1,4 +1,9 @@
 // Supabase Integration Complete - Fresh build trigger
+// Connection Pooling Optimization:
+// - max: 10 connections (optimized for Supabase pooler)
+// - idleTimeoutMillis: 30_000 (30 seconds - releases idle connections)
+// - connectionTimeoutMillis: 10_000 (10 seconds - fast fail on connection issues)
+// This reduces connection overhead and improves performance for frequent queries
 import { Pool, type PoolConfig } from "pg"
 
 function buildPoolConfig(): PoolConfig {

@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
 import type { Product } from "./cart-context"
+import { useIntelligentPolling } from "@/hooks/use-intelligent-polling"
 
 export interface Category {
   id: string
@@ -81,6 +82,15 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   const retryLoad = useCallback(async () => {
     await load()
   }, [load])
+
+  // Intelligent polling for products and categories (medium priority - 30 seconds)
+  // Products and categories don't change frequently, so we poll less often
+  useIntelligentPolling(load, {
+    enabled: true,
+    priority: "medium", // 30 seconds
+    onFocusRefetch: true,
+    onVisibilityChangeRefetch: true,
+  })
 
   useEffect(() => {
     load()
