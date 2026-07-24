@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import pool, { hasColumn } from "@/lib/db"
 import { logEvent } from "@/lib/audit"
+import { revalidateTag } from "next/cache"
 
 export async function GET() {
   try {
@@ -38,7 +39,13 @@ export async function GET() {
        ${whereClause}
        ORDER BY category, name ASC`
     )
-    return NextResponse.json(result.rows)
+    
+    return NextResponse.json(result.rows, {
+      headers: {
+        'Cache-Control': 's-maxage=300, stale-while-revalidate=60',
+      },
+      status: 200,
+    })
   } catch (error) {
     console.error("Failed to fetch products:", error)
     return NextResponse.json({ error: "Failed to fetch products" }, { status: 500 })
@@ -84,6 +91,9 @@ export async function POST(request: Request) {
       { id: session.user.id!, username },
       `Added product "${name}" (₱${Number(price).toFixed(2)}) in category "${category}"`
     )
+    
+    // Invalidate product cache
+    revalidateTag("products")
 
     return NextResponse.json({ product })
   } catch (error) {
@@ -169,6 +179,9 @@ export async function PUT(request: Request) {
       : `Updated "${name}": ${changes.join("; ")}`
 
     logEvent(action, { id: session.user.id!, username }, detail)
+    
+    // Invalidate product cache
+    revalidateTag("products")
 
     return NextResponse.json({ product })
   } catch (error) {
@@ -213,6 +226,9 @@ export async function DELETE(request: Request) {
       { id: session.user.id!, username },
       `Deleted product "${productName}"`
     )
+    
+    // Invalidate product cache
+    revalidateTag("products")
 
     return NextResponse.json({ success: true })
   } catch (error) {

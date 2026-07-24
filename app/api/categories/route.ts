@@ -3,13 +3,19 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import pool from "@/lib/db"
 import { logEvent } from "@/lib/audit"
+import { revalidateTag } from "next/cache"
 
 export async function GET() {
   try {
     const result = await pool.query(
       `SELECT id, name, display_order FROM public.categories ORDER BY display_order ASC, name ASC`
     )
-    return NextResponse.json(result.rows)
+    return NextResponse.json(result.rows, {
+      headers: {
+        'Cache-Control': 's-maxage=300, stale-while-revalidate=60',
+      },
+      status: 200,
+    })
   } catch (error) {
     console.error("Failed to fetch categories:", error)
     return NextResponse.json({ error: "Failed to fetch categories" }, { status: 500 })
@@ -37,6 +43,9 @@ export async function POST(request: Request) {
       { id: session.user.id!, username },
       `Added category "${name}" (id: ${id})`
     )
+    
+    // Invalidate category cache
+    revalidateTag("categories")
 
     return NextResponse.json({ category: result.rows[0] })
   } catch (error) {
@@ -68,6 +77,9 @@ export async function PUT(request: Request) {
       { id: session.user.id!, username },
       `Updated category "${id}" → name: "${name}"`
     )
+    
+    // Invalidate category cache
+    revalidateTag("categories")
 
     return NextResponse.json({ category: result.rows[0] })
   } catch (error) {
@@ -100,6 +112,9 @@ export async function DELETE(request: Request) {
       { id: session.user.id!, username },
       `Deleted category "${id}"`
     )
+    
+    // Invalidate category cache
+    revalidateTag("categories")
 
     return NextResponse.json({ success: true })
   } catch (error) {

@@ -7,6 +7,7 @@ import pool, {
   makeDeletedFilter,
 } from "@/lib/db";
 import { logEvent } from "@/lib/audit";
+import { revalidateTag } from "next/cache";
 
 // Helper function to add missing columns to sales table
 async function ensureSalesTableColumns() {
