@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import pool, { hasColumn, makeDeletedFilter } from "@/lib/db";
+import { unstable_cache } from "next/cache";
 
 // Helper to compute overnight flags and labels
 function addOvernightFields(sale: any) {
@@ -31,31 +32,8 @@ function addOvernightFields(sale: any) {
   return { ...rest, isOvernightShiftOrder, overnightShiftLabel };
 }
 
-export async function GET(request: Request) {
-  const session = await getServerSession(authOptions);
-  console.log("[SALES/MY] Session check:", {
-    hasSession: !!session,
-    hasUser: !!session?.user,
-    userId: session?.user?.id,
-    username: session?.user ? (session.user as any)?.username : null,
-    name: session?.user?.name,
-  });
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { searchParams } = new URL(request.url);
-  const date =
-    searchParams.get("date") ||
-    new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
-  const username = (
-    (session.user as any).username ??
-    session.user.name ??
-    ""
-  ).trim();
-  console.log("[SALES/MY] Fetching sales for:", { username, date });
-
-  try {
+const getMySalesCached = unstable_cache(
+  async (userId: number, username: string, date: string) => {
     const hasIsDeleted = await hasColumn("sales", "is_deleted");
     const hasShiftIdCol = await hasColumn("sales", "shift_id");
     const deletedFilter = makeDeletedFilter(hasIsDeleted, false);
@@ -68,7 +46,7 @@ export async function GET(request: Request) {
          AND DATE(start_time AT TIME ZONE 'Asia/Manila') = $2::date
        ORDER BY CASE WHEN status = 'open' THEN 0 ELSE 1 END, start_time DESC
        LIMIT 1`,
-      [session.user.id, date],
+      [userId, date],
     );
 
     const shift = shiftResult.rows[0] ?? null;
@@ -138,7 +116,7 @@ export async function GET(request: Request) {
            s.void_reason, s.created_at,
            $2::timestamptz AS shift_start_time
          FROM public.sales s
-         WHERE (COALESCE(s.created_by, '') = $1::text OR COALESCE(s.server_name, '') = $1::text)
+         WHERE (COALESCE(s.created_by, '') = $1::text OR COALESCE(server_name, '') = $1::text)
            AND s.created_at >= $2::timestamptz
            AND ($3::timestamptz IS NULL OR s.created_at <= $3::timestamptz)
            ${deletedFilterS}
@@ -173,7 +151,7 @@ export async function GET(request: Request) {
            s.void_reason, s.created_at,
            NULL::timestamptz AS shift_start_time
          FROM public.sales s
-         WHERE (COALESCE(s.created_by, '') = $1::text OR COALESCE(s.server_name, '') = $1::text)
+         WHERE (COALESCE(s.created_by, '') = $1::text OR COALESCE(server_name, '') = $1::text)
            AND DATE(s.created_at AT TIME ZONE 'Asia/Manila') = $2::date
            ${deletedFilterS}
          ORDER BY s.created_at DESC`,
@@ -181,11 +159,50 @@ export async function GET(request: Request) {
       );
     }
 
-    console.log("[SALES/MY] Query results:", {
-      statsCount: statsResult.rows.length,
-      ordersCount: ordersResult.rows.length,
+    return {
+      date,
+      cashier: username,
+      stats: statsResult.rows,
+      orders: ordersResult.rows.map(addOvernightFields),
       shiftId,
-      orders: ordersResult.rows.map((o) => ({
+    };
+  },
+  ["api-sales-my"],
+  { revalidate: 30, tags: ["sales", "orders"] }
+);
+
+export async function GET(request: Request) {
+  const session = await getServerSession(authOptions);
+  console.log("[SALES/MY] Session check:", {
+    hasSession: !!session,
+    hasUser: !!session?.user,
+    userId: session?.user?.id,
+    username: session?.user ? (session.user as any)?.username : null,
+    name: session?.user?.name,
+  });
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const date =
+    searchParams.get("date") ||
+    new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+  const username = (
+    (session.user as any).username ??
+    session.user.name ??
+    ""
+  ).trim();
+  console.log("[SALES/MY] Fetching sales for:", { username, date });
+
+  try {
+    const data = await getMySalesCached(Number(session.user.id), username, date);
+
+    console.log("[SALES/MY] Query results:", {
+      statsCount: data.stats.length,
+      ordersCount: data.orders.length,
+      shiftId: data.shiftId,
+      orders: data.orders.map((o) => ({
         id: o.id,
         order_number: o.order_number,
         created_by: o.created_by,
@@ -194,12 +211,11 @@ export async function GET(request: Request) {
       })),
     });
 
-    return NextResponse.json({
-      date,
-      cashier: username,
-      stats: statsResult.rows,
-      orders: ordersResult.rows.map(addOvernightFields),
-      shiftId,
+    return NextResponse.json(data, {
+      status: 200,
+      headers: {
+        'Cache-Control': 's-maxage=30, stale-while-revalidate=60',
+      },
     });
   } catch (error) {
     console.error("Failed to fetch my sales:", error);

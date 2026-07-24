@@ -585,6 +585,7 @@ export async function POST(request: Request) {
 
     revalidateTag("sales");
     revalidateTag("dashboard-sales");
+    revalidateTag("orders");
 
     return NextResponse.json({ success: true, sale });
   } catch (error) {
