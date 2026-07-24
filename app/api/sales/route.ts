@@ -76,6 +76,7 @@ async function queryShiftSalesForWindow(
   shiftWindow: { start: string; end: string | null },
   deleted: boolean,
   cashierLookup = "",
+  isVoid = false,
 ) {
   const hasIsDeleted = await hasColumn("sales", "is_deleted");
   const hasDeletedAt = await hasColumn("sales", "deleted_at");
@@ -84,6 +85,7 @@ async function queryShiftSalesForWindow(
   const deletedFilterS = makeDeletedFilter(hasIsDeleted, deleted, "s");
   const deletedColumns = makeDeletedColumns(hasDeletedAt, hasDeletedBy, "s");
   const deletedSelect = deletedColumns ? `, ${deletedColumns}` : "";
+  const voidFilter = isVoid ? "AND COALESCE(s.status, 'completed') = 'void'" : "";
   const start = shiftWindow.start;
   const endParam = shiftWindow.end ?? null;
   const safeCashierLookup =
@@ -106,7 +108,8 @@ async function queryShiftSalesForWindow(
        WHERE created_at >= $1::timestamptz
          AND ($2::timestamptz IS NULL OR created_at <= $2::timestamptz)
          ${cashierFilter}
-         ${deletedFilter}`,
+         ${deletedFilter}
+         ${voidFilter}`,
       [start, endParam, safeCashierLookup],
     ),
     pool.query(
@@ -120,6 +123,7 @@ async function queryShiftSalesForWindow(
          AND COALESCE(status, 'completed') = 'completed'
          ${cashierFilter}
          ${deletedFilter}
+         ${voidFilter}
        GROUP BY payment_method
        ORDER BY total DESC`,
       [start, endParam, safeCashierLookup],
@@ -132,9 +136,11 @@ async function queryShiftSalesForWindow(
          s.payment_method, s.server_name, s.created_by,
          COALESCE(s.status, 'completed') AS status,
          s.void_reason, s.created_at,
-         sh.start_time AS shift_start_time${deletedSelect}
+         sh.start_time AS shift_start_time,
+         vl.void_code_used${deletedSelect}
        FROM public.sales s
        LEFT JOIN public.shifts sh ON s.shift_id = sh.id
+       LEFT JOIN public.void_log vl ON vl.sale_id = s.id
        WHERE s.created_at >= $1::timestamptz
          AND ($2::timestamptz IS NULL OR s.created_at <= $2::timestamptz)
          ${
@@ -146,6 +152,7 @@ async function queryShiftSalesForWindow(
              : ""
          }
          ${deletedFilterS}
+         ${voidFilter}
        ORDER BY s.created_at DESC
        LIMIT 50`,
       [start, endParam, safeCashierLookup],
@@ -159,7 +166,7 @@ async function queryShiftSalesForWindow(
   };
 }
 
-async function queryShiftSalesByShiftId(shiftId: number, deleted: boolean) {
+async function queryShiftSalesByShiftId(shiftId: number, deleted: boolean, isVoid = false) {
   const hasIsDeleted = await hasColumn("sales", "is_deleted");
   const hasDeletedAt = await hasColumn("sales", "deleted_at");
   const hasDeletedBy = await hasColumn("sales", "deleted_by");
@@ -167,6 +174,7 @@ async function queryShiftSalesByShiftId(shiftId: number, deleted: boolean) {
   const deletedFilterS = makeDeletedFilter(hasIsDeleted, deleted, "s");
   const deletedColumns = makeDeletedColumns(hasDeletedAt, hasDeletedBy, "s");
   const deletedSelect = deletedColumns ? `, ${deletedColumns}` : "";
+  const voidFilter = isVoid ? "AND COALESCE(s.status, 'completed') = 'void'" : "";
   const [dailyStats, paymentBreakdown, recentOrders] = await Promise.all([
     pool.query(
       `SELECT
@@ -177,7 +185,8 @@ async function queryShiftSalesByShiftId(shiftId: number, deleted: boolean) {
          COALESCE(SUM(service_charge) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_service_charge
        FROM public.sales
        WHERE shift_id = $1::int
-         ${deletedFilter}`,
+         ${deletedFilter}
+         ${voidFilter}`,
       [shiftId],
     ),
     pool.query(
@@ -189,6 +198,7 @@ async function queryShiftSalesByShiftId(shiftId: number, deleted: boolean) {
        WHERE shift_id = $1::int
          AND COALESCE(status, 'completed') = 'completed'
          ${deletedFilter}
+         ${voidFilter}
        GROUP BY payment_method
        ORDER BY total DESC`,
       [shiftId],
@@ -201,11 +211,14 @@ async function queryShiftSalesByShiftId(shiftId: number, deleted: boolean) {
          s.payment_method, s.server_name, s.created_by,
          COALESCE(s.status, 'completed') AS status,
          s.void_reason, s.created_at,
-         sh.start_time AS shift_start_time${deletedSelect}
+         sh.start_time AS shift_start_time,
+         vl.void_code_used${deletedSelect}
        FROM public.sales s
        LEFT JOIN public.shifts sh ON s.shift_id = sh.id
+       LEFT JOIN public.void_log vl ON vl.sale_id = s.id
        WHERE s.shift_id = $1::int
          ${deletedFilterS}
+         ${voidFilter}
        ORDER BY s.created_at DESC
        LIMIT 50`,
       [shiftId],
@@ -222,11 +235,12 @@ async function queryShiftSalesByShiftId(shiftId: number, deleted: boolean) {
 async function getCachedShiftSales(
   shiftId: number,
   deleted: boolean,
+  isVoid: boolean,
   isPermanent: boolean,
   shiftWindow: { start: string; end: string | null },
   cashierLookup = "",
 ) {
-  const cacheKey = getShiftSalesCacheKey(shiftId, deleted);
+  const cacheKey = getShiftSalesCacheKey(shiftId, deleted) + (isVoid ? ":void" : "");
   const now = Date.now();
   const cached = shiftSalesCache.get(cacheKey);
 
@@ -237,11 +251,11 @@ async function getCachedShiftSales(
 
   const hasShiftIdCol = await hasColumn("sales", "shift_id");
   let data = hasShiftIdCol
-    ? await queryShiftSalesByShiftId(shiftId, deleted)
-    : await queryShiftSalesForWindow(shiftWindow, deleted, cashierLookup);
+    ? await queryShiftSalesByShiftId(shiftId, deleted, isVoid)
+    : await queryShiftSalesForWindow(shiftWindow, deleted, cashierLookup, isVoid);
 
   if ((data.dailyStats?.total_orders ?? 0) === 0) {
-    data = await queryShiftSalesForWindow(shiftWindow, deleted, cashierLookup);
+    data = await queryShiftSalesForWindow(shiftWindow, deleted, cashierLookup, isVoid);
   }
   shiftSalesCache.set(cacheKey, {
     data,
@@ -491,6 +505,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Invalid shiftId" }, { status: 400 });
     }
     const deleted = searchParams.get("deleted") === "true";
+    const isVoid = searchParams.get("void") === "true";
     const hasIsDeleted = await hasColumn("sales", "is_deleted");
     const hasDeletedAt = await hasColumn("sales", "deleted_at");
     const hasDeletedBy = await hasColumn("sales", "deleted_by");
@@ -498,8 +513,10 @@ export async function GET(request: Request) {
     const deletedFilterS = makeDeletedFilter(hasIsDeleted, deleted, "s");
     const deletedColumns = makeDeletedColumns(hasDeletedAt, hasDeletedBy, "s");
     const deletedSelect = deletedColumns ? `, ${deletedColumns}` : "";
+    const voidFilter = isVoid ? "AND COALESCE(s.status, 'completed') = 'void'" : "";
     console.log("[SALES/GET] Admin fetching sales for date:", date, {
       deleted,
+      isVoid,
       shiftId,
     });
 
@@ -519,6 +536,7 @@ export async function GET(request: Request) {
         const cached = await getCachedShiftSales(
           shiftId,
           deleted,
+          isVoid,
           isPermanent,
           shiftWindow,
           cashierLookup,
@@ -540,7 +558,8 @@ export async function GET(request: Request) {
              COALESCE(SUM(service_charge) FILTER (WHERE COALESCE(status, 'completed') = 'completed'), 0)::float AS total_service_charge
            FROM public.sales
            WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1::date
-             ${deletedFilter}`,
+             ${deletedFilter}
+             ${voidFilter}`,
           [date],
         ),
         pool.query(
@@ -552,6 +571,7 @@ export async function GET(request: Request) {
            WHERE DATE(created_at AT TIME ZONE 'Asia/Manila') = $1::date
              AND COALESCE(status, 'completed') = 'completed'
              ${deletedFilter}
+             ${voidFilter}
            GROUP BY payment_method
            ORDER BY total DESC`,
           [date],
@@ -564,11 +584,14 @@ export async function GET(request: Request) {
              s.payment_method, s.server_name, s.created_by,
              COALESCE(s.status, 'completed') AS status,
              s.void_reason, s.created_at,
-             sh.start_time AS shift_start_time${deletedSelect}
+             sh.start_time AS shift_start_time,
+             vl.void_code_used${deletedSelect}
            FROM public.sales s
            LEFT JOIN public.shifts sh ON s.shift_id = sh.id
+           LEFT JOIN public.void_log vl ON vl.sale_id = s.id
            WHERE DATE(s.created_at AT TIME ZONE 'Asia/Manila') = $1::date
              ${deletedFilterS}
+             ${voidFilter}
            ORDER BY s.created_at DESC
            LIMIT 50`,
           [date],

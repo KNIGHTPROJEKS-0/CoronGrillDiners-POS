@@ -138,6 +138,7 @@ export default function AdminPage() {
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null)
   const [isMounted, setIsMounted] = useState(false)
   const [trashOrders, setTrashOrders] = useState<TrashOrder[]>([])
+  const [voidedOrders, setVoidedOrders] = useState<TrashOrder[]>([])
   const [staff, setStaff] = useState<StaffUser[]>([])
   const [auditLog, setAuditLog] = useState<AuditEntry[]>([])
   const [securityLog, setSecurityLog] = useState<AuditEntry[]>([])
@@ -209,6 +210,12 @@ export default function AdminPage() {
     const j = await res.json(); setTrashOrders(j.recentOrders ?? [])
   }, [])
 
+  const fetchVoided = useCallback(async (date: string) => {
+    const res = await fetch(`/api/sales?void=true&date=${date}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const j = await res.json(); setVoidedOrders(j.recentOrders ?? [])
+  }, [])
+
   const sessionUserId = session?.user?.id
   const fetchSecurityLog = useCallback(async () => {
     const userId = Number(sessionUserId)
@@ -229,7 +236,9 @@ export default function AdminPage() {
       if (activeSection === "dashboard") await fetchSales(selectedDate, selectedShiftId)
       else if (activeSection === "shifts") setShiftsKey(k => k + 1)
       else if (activeSection === "sales") setSalesKey(k => k + 1)
-      else if (activeSection === "trash") await fetchTrash(selectedDate)
+      else if (activeSection === "trash") {
+        await Promise.all([fetchTrash(selectedDate), fetchVoided(selectedDate)])
+      }
       else if (activeSection === "staff") await fetchStaff()
       else if (activeSection === "activity") await fetchAuditLog()
       else if (activeSection === "security") await fetchSecurityLog()
@@ -240,7 +249,7 @@ export default function AdminPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [activeSection, selectedDate, fetchSales, fetchStaff, fetchAuditLog, fetchSecurityLog, fetchVoidCodes])
+  }, [activeSection, selectedDate, fetchSales, fetchStaff, fetchAuditLog, fetchSecurityLog, fetchVoidCodes, fetchTrash, fetchVoided])
 
   useEffect(() => {
     if (status === "authenticated" && isAdmin && activeSection !== "menu" && activeSection !== "sales") {
@@ -547,7 +556,12 @@ export default function AdminPage() {
           ) : activeSection === "sales" ? (
             <SalesSection key={`sales-${salesKey}`} />
           ) : activeSection === "trash" ? (
-            <TrashSection orders={trashOrders} onRefresh={() => fetchTrash(selectedDate)} />
+            <TrashSection 
+              orders={trashOrders} 
+              voidedOrders={voidedOrders} 
+              onRefreshTrash={() => fetchTrash(selectedDate)} 
+              onRefreshVoided={() => fetchVoided(selectedDate)} 
+            />
           ) : activeSection === "activity" ? (
             <AuditLogSection entries={auditLog} onRefresh={fetchAuditLog} />
           ) : activeSection === "security" ? (
@@ -954,8 +968,18 @@ function DashboardSection({ data, selectedDate, onRefresh }: { data: SalesData |
   )
 }
 
-function TrashSection({ orders, onRefresh }: { orders: TrashOrder[]; onRefresh: () => Promise<void> }) {
-  const [activeTab, setActiveTab] = useState<'orders' | 'logs'>('orders')
+function TrashSection({ 
+    orders, 
+    voidedOrders, 
+    onRefreshTrash, 
+    onRefreshVoided 
+  }: { 
+    orders: TrashOrder[]; 
+    voidedOrders: TrashOrder[];
+    onRefreshTrash: () => Promise<void>; 
+    onRefreshVoided: () => Promise<void>; 
+  }) {
+  const [activeTab, setActiveTab] = useState<'orders' | 'voided' | 'logs'>('orders')
   const [actionBusy, setActionBusy] = useState<string | number | null>(null)
   const [fetchError, setFetchError] = useState(false)
   const [logEntries, setLogEntries] = useState<AuditEntry[]>([])
@@ -1087,7 +1111,9 @@ function TrashSection({ orders, onRefresh }: { orders: TrashOrder[]; onRefresh: 
             variant="outline"
             onClick={() => {
               if (activeTab === 'orders') {
-                onRefresh().catch(() => setFetchError(true))
+                onRefreshTrash().catch(() => setFetchError(true))
+              } else if (activeTab === 'voided') {
+                onRefreshVoided().catch(() => setFetchError(true))
               } else {
                 fetchArchivedLogs()
               }
@@ -2213,11 +2239,13 @@ function VoidCodesSection({ codes, onRefresh }: { codes: VoidCodeRow[]; onRefres
 // ─── Menu Management Section (uses shared product context) ────────────────────
 
 function MenuSection() {
-  const { products, categories, isLoading, addProduct, updateProduct, deleteProduct, refreshProducts } = useProducts()
+  const { products, categories, isLoading, addProduct, updateProduct, deleteProduct, refreshProducts, addCategory } = useProducts()
   const [showModal, setShowModal] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [filterCat, setFilterCat] = useState("all")
   const [saving, setSaving] = useState(false)
+  const [showCategoryModal, setShowCategoryModal] = useState(false)
+  const [categoryName, setCategoryName] = useState("")
 
   const filtered = filterCat === "all" ? products : products.filter((p) => p.category === filterCat)
   const usedCats = Array.from(new Set(products.map((p) => p.category)))
@@ -2249,6 +2277,15 @@ function MenuSection() {
     }
   }
 
+  const handleAddCategory = async () => {
+    const name = categoryName.trim()
+    if (!name) return
+    const id = name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")
+    await addCategory({ id, name, display_order: categories.length })
+    setCategoryName("")
+    setShowCategoryModal(false)
+  }
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-32">
@@ -2274,9 +2311,14 @@ function MenuSection() {
             ))}
           </select>
         </div>
-        <Button onClick={() => { setEditingProduct(null); setShowModal(true) }} className="gap-2">
-          <Plus className="h-4 w-4" /> Add Product
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setShowCategoryModal(true)} className="gap-2">
+            <Tag className="h-4 w-4" /> Add Category
+          </Button>
+          <Button onClick={() => { setEditingProduct(null); setShowModal(true) }} className="gap-2">
+            <Plus className="h-4 w-4" /> Add Product
+          </Button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
@@ -2358,6 +2400,40 @@ function MenuSection() {
           onSave={handleSave}
           onClose={() => { setShowModal(false); setEditingProduct(null) }}
         />
+      )}
+
+      {/* Add Category Modal */}
+      {showCategoryModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Add Category</h2>
+              <Button variant="ghost" size="icon" onClick={() => setShowCategoryModal(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="categoryName">Category Name</Label>
+                <Input
+                  id="categoryName"
+                  value={categoryName}
+                  onChange={(e) => setCategoryName(e.target.value)}
+                  placeholder="e.g., Main Course, Appetizers"
+                  autoFocus
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setShowCategoryModal(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleAddCategory} disabled={!categoryName.trim()}>
+                  Add Category
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </>
   )

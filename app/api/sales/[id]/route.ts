@@ -17,6 +17,47 @@ async function ensureSalesTableColumns() {
   }
 }
 
+// Helper function for batch stock updates (avoids N+1 queries)
+async function batchUpdateStock(
+  client: any,
+  items: Array<{ id?: number; quantity: number }>,
+  operation: 'add' | 'subtract'
+) {
+  // Filter valid items
+  const validItems = items.filter(
+    (item: any) => item.id && Number(item.quantity) > 0
+  )
+  
+  if (validItems.length === 0) return
+  
+  // Build CASE expression for batch update
+  const caseExpressions = validItems.map((item: any) => {
+    const quantity = Number(item.quantity)
+    const delta = operation === 'add' ? `+ ${quantity}` : `- ${quantity}`
+    return `WHEN ${item.id} THEN stock ${delta}`
+  }).join(" ")
+  
+  const productIds = validItems.map((item: any) => item.id).join(", ")
+  
+  // Build WHERE clause conditions
+  const whereConditions = [`id IN (${productIds})`, "stock IS NOT NULL"]
+  if (operation === 'subtract') {
+    // For subtract, ensure each product has enough stock
+    validItems.forEach((item: any) => {
+      whereConditions.push(`(id != ${item.id} OR stock >= ${Number(item.quantity)})`)
+    })
+  }
+  
+  const whereClause = whereConditions.join(" AND ")
+  
+  // Execute single batch update
+  await client.query(
+    `UPDATE public.products
+     SET stock = CASE id ${caseExpressions} ELSE stock END
+     WHERE ${whereClause}`
+  )
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -232,26 +273,21 @@ export async function PATCH(
             // Don't fail the whole transaction if this fails
           }
         }
-        for (const item of saleItems) {
-          if (item.id && Number(item.quantity) > 0) {
-            await client.query(
-              `UPDATE public.products
-               SET stock = stock + $1
-               WHERE id = $2 AND stock IS NOT NULL`,
-              [Number(item.quantity), item.id]
-            )
-          }
+        
+        // Batch update: restore stock (avoids N+1 queries)
+        try {
+          await batchUpdateStock(client, saleItems, 'add')
+        } catch (stockError) {
+          console.error("Failed to batch restore stock:", stockError)
+          throw new Error("Failed to restore stock for voided order")
         }
       } else if (status === "completed" && prevStatus === "void") {
-        for (const item of saleItems) {
-          if (item.id && Number(item.quantity) > 0) {
-            await client.query(
-              `UPDATE public.products
-               SET stock = stock - $1
-               WHERE id = $2 AND stock IS NOT NULL AND stock >= $1`,
-              [Number(item.quantity), item.id]
-            )
-          }
+        // Batch update: deduct stock (avoids N+1 queries)
+        try {
+          await batchUpdateStock(client, saleItems, 'subtract')
+        } catch (stockError) {
+          console.error("Failed to batch deduct stock:", stockError)
+          throw new Error("Failed to deduct stock for restored order")
         }
       }
       if (saleShiftId) {
