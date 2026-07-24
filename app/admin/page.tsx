@@ -205,15 +205,25 @@ export default function AdminPage() {
   }, [])
 
   const fetchTrash = useCallback(async (date: string) => {
-    const res = await fetch(`/api/sales?deleted=true&date=${date}`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const j = await res.json(); setTrashOrders(j.recentOrders ?? [])
+    try {
+      const res = await fetch(`/api/sales?deleted=true&date=${date}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const j = await res.json(); setTrashOrders(j.recentOrders ?? [])
+    } catch (err) {
+      console.error("Failed to fetch trash orders:", err)
+      // Don't throw, just leave trashOrders as is or reset
+    }
   }, [])
 
   const fetchVoided = useCallback(async (date: string) => {
-    const res = await fetch(`/api/sales?void=true&date=${date}`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const j = await res.json(); setVoidedOrders(j.recentOrders ?? [])
+    try {
+      const res = await fetch(`/api/sales?void=true&date=${date}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const j = await res.json(); setVoidedOrders(j.recentOrders ?? [])
+    } catch (err) {
+      console.error("Failed to fetch voided orders:", err)
+      // Don't throw, just leave voidedOrders as is or reset
+    }
   }, [])
 
   const sessionUserId = session?.user?.id
@@ -237,6 +247,7 @@ export default function AdminPage() {
       else if (activeSection === "shifts") setShiftsKey(k => k + 1)
       else if (activeSection === "sales") setSalesKey(k => k + 1)
       else if (activeSection === "trash") {
+        // Trash fetching errors don't affect other sections, so don't set sectionError
         await Promise.all([fetchTrash(selectedDate), fetchVoided(selectedDate)])
       }
       else if (activeSection === "staff") await fetchStaff()
@@ -244,8 +255,12 @@ export default function AdminPage() {
       else if (activeSection === "security") await fetchSecurityLog()
       else if (activeSection === "void-codes") await fetchVoidCodes()
       loadedRef.current.add(key)
-    } catch {
-      setSectionError(true)
+    } catch (err) {
+      // Only set sectionError if the error isn't from trash section
+      if (activeSection !== "trash") {
+        setSectionError(true)
+      }
+      console.error("Error in refreshCurrent:", err)
     } finally {
       setIsLoading(false)
     }
@@ -1015,7 +1030,7 @@ function TrashSection({
         body: JSON.stringify({ isDeleted: false }),
       })
       if (!res.ok) throw new Error()
-      await onRefresh()
+      await onRefreshTrash()
       toast.success(`Order ${order.order_number} restored.`)
     } catch {
       setFetchError(true)
@@ -1031,7 +1046,7 @@ function TrashSection({
     try {
       const res = await fetch(`/api/sales/${order.id}?force=true`, { method: "DELETE" })
       if (!res.ok) throw new Error()
-      await onRefresh()
+      await onRefreshTrash()
       toast.success(`Order ${order.order_number} permanently deleted.`)
     } catch {
       setFetchError(true)
@@ -1090,7 +1105,16 @@ function TrashSection({
           <p className="text-sm text-muted-foreground mb-4">
             The server could not be reached. Please refresh or try again later.
           </p>
-          <Button variant="outline" size="sm" onClick={() => { setFetchError(false); onRefresh().catch(() => setFetchError(true)) }}>
+          <Button variant="outline" size="sm" onClick={() => { 
+            setFetchError(false); 
+            if (activeTab === 'orders') {
+              onRefreshTrash().catch(() => setFetchError(true)) 
+            } else if (activeTab === 'voided') {
+              onRefreshVoided().catch(() => setFetchError(true)) 
+            } else {
+              fetchArchivedLogs().catch(() => setFetchError(true)) 
+            }
+          }}>
             <RefreshCw className="h-4 w-4 mr-2" /> Refresh
           </Button>
         </div>

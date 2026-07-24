@@ -15,6 +15,9 @@ async function ensureSalesTableColumns() {
     await client.query(`
       ALTER TABLE sales ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'completed';
       ALTER TABLE sales ADD COLUMN IF NOT EXISTS void_reason TEXT;
+      ALTER TABLE sales ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT false;
+      ALTER TABLE sales ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+      ALTER TABLE sales ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(255);
     `);
   } finally {
     client.release();
